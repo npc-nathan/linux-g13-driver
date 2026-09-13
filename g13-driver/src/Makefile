@@ -143,7 +143,7 @@ install:
 	install -d $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR)
 	install -m 644 lcdsdk/liblogitechlcd.so $(DESTDIR)$(LIBDIR)/liblogitechlcd.so
 	install -m 644 lcdsdk/LogitechLcd.h $(DESTDIR)$(INCLUDEDIR)/LogitechLcd.h
-	sed 's|@BINDIR@|$(BINDIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service > g13-lcd-bridge.service
+	sed 's|@BINDIR@|$(BINDIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service.in > g13-lcd-bridge.service
 	install -m 644 g13-lcd-bridge.service $(DESTDIR)$(SYSTEMDDIR)/g13-lcd-bridge.service
 	rm g13-lcd-bridge.service
 	
@@ -194,7 +194,7 @@ install-user:
 	cp lcdsdk/g13-lcd-bridge $(USER_INSTALL_DIR)/g13-lcd-bridge
 	chmod +x $(USER_INSTALL_DIR)/g13-lcd-bridge
 	install -d $(USER_SYSTEMD_DIR)
-	sed 's|@BINDIR@|$(USER_INSTALL_DIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service > $(USER_SYSTEMD_DIR)/g13-lcd-bridge.service
+	sed 's|@BINDIR@|$(USER_INSTALL_DIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service.in > $(USER_SYSTEMD_DIR)/g13-lcd-bridge.service
 
 	# The service manager, and the menu entries that use it
 	cp scripts/g13-service $(USER_INSTALL_DIR)/g13-service

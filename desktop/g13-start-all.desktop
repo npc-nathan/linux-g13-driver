@@ -5,4 +5,4 @@ Comment=Start the driver, the screen visuals and the Windows bridge
 Exec=@BINDIR@/g13-service start all
 Icon=media-playback-start
 Terminal=false
-Categories=Utility;HardwareSettings;
+Categories=Utility;Settings;HardwareSettings;
