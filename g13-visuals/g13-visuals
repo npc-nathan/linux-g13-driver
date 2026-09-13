@@ -27,6 +27,7 @@ Visuals:
     custom   five lines from $XDG_CONFIG_HOME/g13/screen.txt
 """
 import json
+import math
 import os
 import socket
 import string
@@ -97,6 +98,127 @@ class Screen:
     def bar(self, x, y, width, height, percent):
         g13lcd.draw_bar(self.rows, x, y, width, height, percent)
 
+    def segments(self, x, y, width, height, count, percent, gap=1):
+        """A gauge made of blocks rather than a solid bar.
+
+        Easier to read at a glance when it is small, and it gives the screen its own look
+        instead of a progress bar borrowed from a desktop. Blocks are lit from the left in
+        proportion to the percentage; nothing is drawn for the unlit ones, so there is no
+        hollow track for a value to sit on.
+        """
+        count = max(1, int(count))
+        width, height = int(width), int(height)
+        block = (width - (count - 1) * gap) // count
+        if block < 1:
+            block, count = 1, max(1, width)
+        lit = int(round(count * max(0.0, min(100.0, float(percent))) / 100.0))
+        for index in range(min(count, lit)):
+            left = int(x) + index * (block + gap)
+            self.rect(left, y, left + block, y + height)
+
+    def brackets(self, x, y, width, height, length=6, thick=2):
+        """Corner marks only: a frame round a widget without boxing it in."""
+        x, y = int(x), int(y)
+        right, bottom = x + int(width), y + int(height)
+        left_arm, down_arm = min(length, width // 2), min(length, height // 2)
+
+        self.rect(x, y, x + left_arm, y + thick)
+        self.rect(x, y, x + thick, y + down_arm)
+        self.rect(right - left_arm, y, right, y + thick)
+        self.rect(right - thick, y, right, y + down_arm)
+        self.rect(x, bottom - thick, x + left_arm, bottom)
+        self.rect(x, bottom - down_arm, x + thick, bottom)
+        self.rect(right - left_arm, bottom - thick, right, bottom)
+        self.rect(right - thick, bottom - down_arm, right, bottom)
+
+    def arrow(self, cx, cy, radius, angle_degrees, tail=0):
+        """A filled arrow: 0 points up, 90 right, and so on clockwise.
+
+        A bearing is the one thing a screen this size cannot say in words, so a HUD points
+        at the next corner instead of describing it.
+        """
+        radius = max(2.0, float(radius))
+        angle = math.radians(float(angle_degrees))
+        sin, cos = math.sin(angle), math.cos(angle)
+
+        def placed(px, py):
+            return (cx + px * cos - py * sin, cy + px * sin + py * cos)
+
+        if tail:
+            self.line(placed(0, 0.7 * radius), placed(0, 0.7 * radius + float(tail)), 2)
+
+        self.fill_triangle([placed(0, -radius),
+                            placed(-0.62 * radius, 0.62 * radius),
+                            placed(0.62 * radius, 0.62 * radius)])
+
+        # The apex is a single point, so the rasterised triangle loses it when the arrow is
+        # not on an axis (the tip stops a pixel short). Stamp the point itself.
+        tip_x, tip_y = placed(0, -radius)
+        tip_x, tip_y = int(round(tip_x)) - 1, int(round(tip_y)) - 1
+        self.rect(tip_x, tip_y, tip_x + 2, tip_y + 2)
+
+    def turn(self, x, y, angle_degrees, size=11):
+        """A turn arrow: which way the next corner goes.
+
+        Four shapes rather than a rotated arrow - at this size twenty degrees is one pixel,
+        and a road-sign shape reads at a glance where a slight rotation does not.
+        """
+        x, y = int(x), int(y)
+        size = int(size)
+        angle = float(angle_degrees)
+        magnitude = abs(angle)
+        middle = x + size // 2
+
+        if magnitude <= 20:                       # straight on
+            self.rect(middle, y + 3, middle + 2, y + size)
+            self.arrow(middle + 1, y + 4, 3.2, 0)
+
+        elif magnitude <= 115:                    # left or right
+            if angle > 0:                         # right: along the bottom, up the right
+                self.rect(x, y + size - 3, x + size - 5, y + size - 1)
+                self.rect(x + size - 5, y + 3, x + size - 3, y + size)
+                self.arrow(x + size - 4, y + 4, 3.2, 0)
+            else:                                 # left: along the bottom, up the left
+                self.rect(x + 5, y + size - 3, x + size, y + size - 1)
+                self.rect(x + 2, y + 3, x + 4, y + size)
+                self.arrow(x + 3, y + 4, 3.2, 0)
+
+        else:                                     # double back
+            self.rect(x + 2, y + 2, x + 4, y + 7)
+            self.rect(x + 2, y + 2, x + size - 2, y + 4)
+            self.rect(x + size - 4, y + 2, x + size - 2, y + size - 3)
+            self.arrow(x + 3, y + size - 2, 3.2, 180)
+
+    def line(self, start, end, thick=2):
+        """A straight line of any angle, stamped in small steps."""
+        (x0, y0), (x1, y1) = start, end
+        steps = max(1, int(max(abs(x1 - x0), abs(y1 - y0))))
+        for step in range(steps + 1):
+            along = step / steps
+            px = int(round(x0 + (x1 - x0) * along))
+            py = int(round(y0 + (y1 - y0) * along))
+            self.rect(px, py, px + thick, py + thick)
+
+    def fill_triangle(self, points):
+        """Fills the triangle between three (x, y) points, for arrow heads."""
+        (x0, y0), (x1, y1), (x2, y2) = points
+        left = int(math.floor(min(x0, x1, x2)))
+        right = int(math.ceil(max(x0, x1, x2)))
+        top = int(math.floor(min(y0, y1, y2)))
+        bottom = int(math.ceil(max(y0, y1, y2)))
+
+        def side(ax, ay, bx, by, px, py):
+            return (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+
+        for py in range(top, bottom + 1):
+            for px in range(left, right + 1):
+                centre_x, centre_y = px + 0.5, py + 0.5
+                signs = (side(x0, y0, x1, y1, centre_x, centre_y) < 0,
+                         side(x1, y1, x2, y2, centre_x, centre_y) < 0,
+                         side(x2, y2, x0, y0, centre_x, centre_y) < 0)
+                if signs[0] == signs[1] == signs[2]:
+                    self.rect(px, py, px + 1, py + 1)
+
     def frame_and_title(self, title):
         """The house style: a border, a title, and a rule under it."""
         width, height = g13lcd.VISIBLE_WIDTH, g13lcd.VISIBLE_HEIGHT
@@ -118,6 +240,22 @@ def centred(message, width=None):
     """Left padding that centres a string on the screen."""
     width = width or g13lcd.VISIBLE_WIDTH
     return max(0, (width - len(message) * 6) // 2)
+
+
+def scrolling(message, widget, now=None):
+    """A sliding window onto a long line, for text that does not fit.
+
+    An objective is not twenty-five characters, and cutting it off loses the half that
+    matters. The line wraps round with a gap between its end and its start, so a title that
+    fits is left alone and one that does not is readable in a single pass.
+    """
+    window = int(widget.get("scroll_width", 25))
+    speed = float(widget.get("scroll_speed", 3))
+    if len(message) <= window:
+        return message
+    padded = message + "   "
+    offset = int((time.time() if now is None else now) * speed) % len(padded)
+    return (padded + padded)[offset:offset + window]
 
 
 class ClockVisual:
@@ -303,6 +441,9 @@ class Values:
     """
 
     CACHE_SECONDS = 2.0
+    #: Live sources are read far more often: a game's HUD should not lag a quarter of a
+    #: second behind the game because of a cache meant for clocks.
+    LIVE_CACHE_SECONDS = 0.2
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock
@@ -361,7 +502,9 @@ class Values:
     def raw(self, source):
         now = self.clock()
         cached = self.cache.get(source)
-        if cached and now - cached[0] < self.CACHE_SECONDS:
+        seconds = (self.LIVE_CACHE_SECONDS if source.startswith(("json:", "file:"))
+                   else self.CACHE_SECONDS)
+        if cached and now - cached[0] < seconds:
             return cached[1]
 
         value = self.resolve(source)
@@ -415,10 +558,47 @@ class Values:
             except OSError:
                 return ""
 
+        if source.startswith("json:"):
+            return self.json_field(source[5:])
+
         if source.startswith("cmd:"):
             return shell(source[4:]) or ""
 
         return ""
+
+    def json_field(self, spec):
+        """One field of a JSON file: `json:<path>#<field>`, e.g. json:/tmp/hud.json#ammo.
+
+        This is how a game feeds the screen: it writes a small JSON file and the applet
+        reads the fields it wants. Nested fields are dotted (`#hud.ammo`) and a list index
+        is a number (`#route.0`). With no field the whole file is a value only if it is a
+        single number, string or boolean. A missing file, unreadable JSON, missing field or
+        wrong type all read as an empty string - a game that is not running must leave the
+        screen blank, not take the daemon down.
+        """
+        path, separator, field = spec.rpartition("#")
+        if not separator:
+            path, field = spec, ""
+
+        try:
+            with open(os.path.expanduser(path)) as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            return ""
+
+        if not field:
+            return data if isinstance(data, (int, float, str, bool)) else ""
+
+        for part in field.split("."):
+            if isinstance(data, dict) and part in data:
+                data = data[part]
+            elif isinstance(data, list) and part.lstrip("-").isdigit():
+                index = int(part)
+                data = data[index] if -len(data) <= index < len(data) else ""
+            else:
+                return ""
+
+        return data if isinstance(data, (int, float, str, bool)) else ""
 
     def all(self, sources):
         """Resolves several sources at once, for the values file."""
@@ -446,33 +626,55 @@ class LayoutVisual:
         self.values = values
         self.name = APPLET_PREFIX + str(definition.get("name", "applet"))
         self.interval = float(definition.get("interval", 1.0))
+        #: Short names for data sources, so a widget can say {"source": "ammo"} and a
+        #: format can say {ammo} instead of repeating a path in full:
+        #: "sources": {"ammo": "json:~/hud.json#ammo"}
+        self.aliases = {str(key): str(value) for key, value in
+                        (definition.get("sources") or {}).items()}
 
     @property
     def title(self):
         return str(self.definition.get("title", self.definition.get("name", "APPLET")))
 
-    def sources(self):
-        """Every data source this applet asks for."""
+    def spec_of(self, name):
+        """The real source an applet's short name stands for, following aliases."""
+        for _step in range(8):
+            if name not in self.aliases:
+                break
+            name = self.aliases[name]
+        return name
+
+    def asked_names(self):
+        """The names the applet mentions: widget sources and format fields."""
         wanted = set()
         for widget in self.definition.get("widgets", []):
             if widget.get("source"):
-                wanted.add(widget["source"])
+                wanted.add(str(widget["source"]))
             for _literal, field, _spec, _conversion in string.Formatter().parse(
                     widget.get("format") or ""):
                 if field:
                     wanted.add(field.split(".")[0].split("[")[0])
         return sorted(wanted)
 
+    def sources(self):
+        """Every data source this applet asks for, as the specs to actually read."""
+        return sorted({self.spec_of(name) for name in self.asked_names()})
+
     def value_of(self, source):
         if source is None:
             return ""
-        return self.values.raw(source)
+        return self.values.raw(self.spec_of(str(source)))
 
     def render(self, screen, context):
         border = self.definition.get("border", True)
         if border:
             screen.frame_and_title(self.title)
         values = self.values.all(self.sources())
+        # The applet's own short names work in formats too, so {ammo} can stand for a path.
+        for name in self.asked_names():
+            spec = self.spec_of(name)
+            if spec in values:
+                values[name] = values[spec]
 
         for widget in self.definition.get("widgets", []):
             kind = widget.get("type", "text")
@@ -488,6 +690,11 @@ class LayoutVisual:
                         message = template.format(**values)
                     except (KeyError, ValueError, IndexError):
                         message = "?"
+
+                # A long line - an objective, a track title - slides along rather than
+                # being cut off at the edge.
+                if widget.get("scroll"):
+                    message = scrolling(message, widget)
 
                 # Alignment is computed from the text, so a design can pin a value to the
                 # right edge without knowing how wide the number will be.
@@ -513,8 +720,38 @@ class LayoutVisual:
             elif kind == "box":
                 screen.rect(x, y, x + int(widget.get("w", 158)), y + int(widget.get("h", 10)))
 
+            elif kind == "segments":
+                top = float(widget.get("max", 100)) or 100
+                try:
+                    percent = 100.0 * float(self.value_of(widget.get("source"))) / top
+                except (TypeError, ValueError):
+                    percent = 0
+                screen.segments(x, y, int(widget.get("w", 88)), int(widget.get("h", 6)),
+                                int(widget.get("count", 12)), percent)
+
+            elif kind == "brackets":
+                screen.brackets(x, y, int(widget.get("w", 158)), int(widget.get("h", 10)),
+                                int(widget.get("len", 6)), int(widget.get("thick", 2)))
+
+            elif kind == "arrow":
+                screen.arrow(x, y, float(widget.get("r", 8)), self.angle_of(widget))
+
+            elif kind == "turn":
+                screen.turn(x, y, self.angle_of(widget), int(widget.get("size", 11)))
+
             elif kind == "vline":
                 screen.rect(x, y, x + 1, y + int(widget.get("h", 10)))
+
+    def angle_of(self, widget):
+        """The angle a directional widget points at, read from its source.
+
+        A game that is not running gives no value, and no direction is the right answer
+        then, so the arrow points up rather than the applet falling over.
+        """
+        try:
+            return float(self.value_of(widget.get("source")))
+        except (TypeError, ValueError):
+            return 0.0
 
 
 def applet_dir():
@@ -760,6 +997,20 @@ def publish(lines, values):
         pass
 
 
+def config_supersedes(engine, fresh):
+    """Whether a freshly read config file should replace the running engine.
+
+    The file is the shared truth - which visuals exist, the order, the cycle settings, and
+    which one is showing. The daemon writes its own changes (G24, the menu) back into that
+    same file, so adopting it never fights the device. An earlier version kept the running
+    visual whenever it was still enabled, which quietly made a change made anywhere else -
+    the config tool's "Show now" - do nothing at all.
+    """
+    return (fresh.active != engine.active
+            or fresh.snapshot() != engine.snapshot()
+            or set(fresh.visuals) != set(engine.visuals))
+
+
 def main():
     values = Values()
     visuals = registry(values)
@@ -824,14 +1075,8 @@ def main():
                     fresh_visuals = registry(values)
                     fresh = Engine(read_config(), clock=engine.clock,
                                    visuals=fresh_visuals, values=values)
-                    # Keep the current visual if it still exists, so editing an applet
-                    # does not bounce the screen back to the first one.
-                    if engine.active in fresh.visuals and engine.active != fresh.active:
-                        fresh.active = engine.active
-                        fresh.enabled = [name for name in fresh.enabled] or [engine.active]
-                        if engine.active not in fresh.enabled:
-                            fresh.enabled.append(engine.active)
-                    if fresh.snapshot() != engine.snapshot() or set(fresh.visuals) != set(engine.visuals):
+                    # The file is the shared truth, including which visual is showing.
+                    if config_supersedes(engine, fresh):
                         engine = fresh
                         dirty = True
 
