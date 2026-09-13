@@ -73,6 +73,11 @@ private:
     void init_fifo();        // Create pipe
     void check_fifo();       // Read pipe data
     void cleanup_fifo();     // Remove pipe
+    /**
+     * Applies one "#" command from the LCD pipe. Returns true if the screen changed.
+     * @param line The command line, e.g. "#text 4 8 hello".
+     */
+    bool handle_lcd_command(const std::string& line);
 
     // FIFO the config tool reads to implement record mode ("press MR, then the key
     // to program"). One line per physical key change: "key <code> <0|1>".

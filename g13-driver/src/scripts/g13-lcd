@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Write to the Logitech G13's LCD screen.
+
+The screen is 160x48 pixels, one bit each. The driver turns whatever you send into a
+frame and pushes it to the device, so this is usable as a plain display: text
+anywhere on the screen, or a raw bitmap for bars, graphs and icons.
+
+Command line:
+
+    g13-lcd "CPU 42%" "MEM 61%"     # a screen of text lines (clears first)
+    g13-lcd --at 4 8 "top left"     # one line at a position, without clearing
+    g13-lcd --clear
+    g13-lcd --image shot.pbm        # push a bitmap, scaled to fit and centred
+    g13-lcd --hex 0001ff...         # push a raw 960 byte frame (1920 hex digits)
+
+As a library, for games and scripts:
+
+    import g13lcd
+    g13lcd.clear()
+    g13lcd.at(0, 0, "HP 120/120")
+    g13lcd.frame(g13lcd.pixels_to_frame([[0, 1], [1, 0]]))
+
+The driver reads plain lines of text as before (first line clears the screen, each
+following line goes below the last), and lines starting with '#' as commands:
+'#clear', '#text <x> <y> <text>' and '#bitmap <1920 hex digits>'.
+
+Frame layout, should you build one by hand: byte x + (y // 8) * 160 holds the eight
+pixels of column x starting at row (y // 8) * 8, with the top row of that group in
+bit 0.
+"""
+import os
+import sys
+
+WIDTH = 160
+HEIGHT = 48
+FRAME_BYTES = WIDTH * HEIGHT // 8  # 960
+
+
+def lcd_path():
+    """The driver's LCD pipe for this session."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return os.path.join(runtime, "g13-lcd")
+    return "/tmp/g13-lcd"
+
+
+def send(lines, path=None):
+    """Sends lines to the driver. Raises OSError if the driver is not running."""
+    target = path or lcd_path()
+    with open(target, "w") as pipe:
+        for line in lines:
+            pipe.write(str(line) + "\n")
+        pipe.flush()
+
+
+def text(*lines, path=None):
+    """Shows lines of text from the top of the screen, clearing what was there."""
+    send(list(lines), path=path)
+
+
+def at(x, y, message, path=None):
+    """Draws one line of text at a position, leaving the rest of the screen alone."""
+    send(["#text %d %d %s" % (int(x), int(y), message)], path=path)
+
+
+def clear(path=None):
+    """Blanks the screen."""
+    send(["#clear"], path=path)
+
+
+def frame(data, path=None):
+    """Pushes a 960 byte frame buffer."""
+    if len(data) != FRAME_BYTES:
+        raise ValueError("a frame is %d bytes, got %d" % (FRAME_BYTES, len(data)))
+    send(["#bitmap " + data.hex()], path=path)
+
+
+def pixels_to_frame(rows):
+    """Turns a list of rows of 0/1 (or True/False) into a frame buffer.
+
+    Rows may be shorter than the screen; the rest stays blank.
+    """
+    buffer = bytearray(FRAME_BYTES)
+    for y, row in enumerate(rows):
+        if y >= HEIGHT:
+            break
+        for x, pixel in enumerate(row):
+            if x >= WIDTH:
+                break
+            if pixel:
+                buffer[x + (y // 8) * WIDTH] |= 1 << (y % 8)
+    return bytes(buffer)
+
+
+def _pbm_header(data):
+    """Returns (width, height, offset-of-pixel-data) for a PBM file."""
+    position = 2  # past the magic number
+    values = []
+
+    while len(values) < 2:
+        while position < len(data) and data[position:position + 1].isspace():
+            position += 1
+        if data[position:position + 1] == b"#":
+            while position < len(data) and data[position:position + 1] != b"\n":
+                position += 1
+            continue
+        start = position
+        while position < len(data) and not data[position:position + 1].isspace():
+            position += 1
+        values.append(int(data[start:position]))
+
+    # A single whitespace character separates the header from the pixels; be generous
+    # and treat a CR LF as that one separator rather than as pixel data.
+    if data[position:position + 2] == b"\r\n":
+        position += 2
+    elif data[position:position + 1].isspace():
+        position += 1
+
+    return values[0], values[1], position
+
+
+def read_pbm(path):
+    """Reads a PBM (P1 text or P4 binary) into rows of 0/1. 1 means "pixel on"."""
+    with open(path, "rb") as handle:
+        data = handle.read()
+
+    if data[:2] == b"P4":
+        width, height, position = _pbm_header(data)
+        stride = (width + 7) // 8
+        rows = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                byte = data[position + y * stride + x // 8]
+                row.append((byte >> (7 - (x % 8))) & 1)
+            rows.append(row)
+        return rows
+
+    if data[:2] == b"P1":
+        width, height, position = _pbm_header(data)
+        numbers = []
+        for line in data[position:].split(b"\n"):
+            line = line.split(b"#", 1)[0]
+            numbers.extend(int(token) for token in line.split() if token.isdigit())
+        return [numbers[y * width:(y + 1) * width] for y in range(height)]
+
+    raise ValueError("%s is not a PBM (P1 or P4) file" % path)
+
+
+def fit(rows, width=WIDTH, height=HEIGHT):
+    """Scales rows to fit the screen, keeping the shape, and centres them."""
+    source_height = len(rows)
+    source_width = max((len(row) for row in rows), default=0)
+    if not source_width or not source_height:
+        return []
+
+    scale = min(width / source_width, height / source_height)
+    target_width = max(1, min(width, int(source_width * scale)))
+    target_height = max(1, min(height, int(source_height * scale)))
+    offset_x = (width - target_width) // 2
+    offset_y = (height - target_height) // 2
+
+    scaled = []
+    for y in range(offset_y):
+        scaled.append([0] * width)
+    for y in range(target_height):
+        source_y = min(source_height - 1, int(y / scale))
+        row = [0] * offset_x
+        for x in range(target_width):
+            source_x = min(source_width - 1, int(x / scale))
+            row.append(1 if rows[source_y][source_x] else 0)
+        row.extend([0] * (width - len(row)))
+        scaled.append(row)
+    while len(scaled) < height:
+        scaled.append([0] * width)
+    return scaled
+
+
+def main(argv):
+    path = None
+    if "--pipe" in argv:
+        index = argv.index("--pipe")
+        path = argv[index + 1]
+        del argv[index:index + 2]
+
+    if not argv:
+        print(__doc__.strip())
+        return 0
+
+    command = argv[0]
+    if command == "--clear":
+        clear(path=path)
+    elif command == "--at":
+        if len(argv) < 4:
+            raise SystemExit("--at needs X Y TEXT")
+        at(argv[1], argv[2], " ".join(argv[3:]), path=path)
+    elif command == "--image":
+        if len(argv) < 2:
+            raise SystemExit("--image needs a .pbm file")
+        frame(pixels_to_frame(fit(read_pbm(argv[1]))), path=path)
+    elif command == "--hex":
+        if len(argv) < 2:
+            raise SystemExit("--hex needs %d hex digits" % (FRAME_BYTES * 2))
+        send(["#bitmap " + argv[1]], path=path)
+    elif command in ("-h", "--help"):
+        print(__doc__.strip())
+    else:
+        text(*argv, path=path)
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except OSError as error:
+        print("Could not write to the LCD: %s" % error, file=sys.stderr)
+        print("Is the driver running?  systemctl --user status g13.service", file=sys.stderr)
+        sys.exit(1)

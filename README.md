@@ -131,6 +131,42 @@ because an absent entry there means the device's own behaviour.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
+## The LCD screen as a display
+
+`g13-lcd` (installed alongside the driver) writes to the screen: 160x48 pixels, one bit
+each.
+
+```sh
+g13-lcd "CPU 42%" "MEM 61%"     # a screen of text lines (clears first)
+g13-lcd --at 4 8 "top left"     # one line at a position, without clearing
+g13-lcd --clear
+g13-lcd --image shot.pbm        # a bitmap, scaled to fit and centred
+g13-lcd --hex 0001ff...         # a raw 960 byte frame (1920 hex digits)
+```
+
+Anything that can write to a file can drive the screen: the driver reads
+`$XDG_RUNTIME_DIR/g13-lcd`. Plain lines of text work as they always did (the first line
+clears the screen and each following line goes below the last), and lines starting with
+`#` are commands:
+
+| Command | Effect |
+| --- | --- |
+| `#clear` | blank the screen |
+| `#text <x> <y> <text>` | draw text at a position, leaving the rest of the screen alone |
+| `#bitmap <1920 hex digits>` | replace the screen with a raw 960 byte frame |
+
+Everything read in one go is painted as a single frame, so a screen built from several
+lines does not flicker. Frames are 160x48, one bit per pixel, stored as vertical bytes:
+byte `x + (y / 8) * 160` holds the eight pixels of column `x` starting at row
+`(y / 8) * 8`, with the lowest row of that group in bit 0. `g13-lcd` also works as a
+module - `g13lcd.at()`, `g13lcd.frame()`, `g13lcd.pixels_to_frame()` - so a game can put
+its own stats on the screen.
+
+What this cannot do: the Windows Logitech LCD SDK and the LGS LCD applets are
+Windows-only binaries, so nothing on Linux can load them and games with built-in
+Logitech LCD support cannot be pointed at this. What is reproducible is the mechanism
+they used: an application pushes data, the driver renders it.
+
 ## Record mode (the MR button)
 
 Press **MR** on the pad while the config tool is open:

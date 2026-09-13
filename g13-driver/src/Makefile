@@ -78,6 +78,7 @@ install:
 	
 	# Debug helper
 	install -m 755 scripts/g13-keywatch $(DESTDIR)$(BINDIR)/g13-keywatch
+	install -m 755 scripts/g13-lcd $(DESTDIR)$(BINDIR)/g13-lcd
 	
 	# Systemd (Copy static file)
 	install -d $(DESTDIR)$(SYSTEMDDIR)
@@ -104,7 +105,8 @@ install-user:
 	cp $(TARGET_PATH) $(USER_INSTALL_DIR)/linux-g13-driver
 	cp $(GUI_JAR_SRC) $(USER_INSTALL_DIR)/$(GUI_JAR_NAME)
 	cp scripts/g13-keywatch $(USER_INSTALL_DIR)/g13-keywatch
-	chmod +x $(USER_INSTALL_DIR)/g13-keywatch
+	cp scripts/g13-lcd $(USER_INSTALL_DIR)/g13-lcd
+	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd
 	
 	# Wrapper
 	echo '#!/bin/sh' > $(USER_INSTALL_DIR)/g13-gui

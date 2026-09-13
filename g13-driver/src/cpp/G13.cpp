@@ -867,29 +867,98 @@ void G13::write_event(int key, int pressed) {
 void G13::check_fifo() {
     if (fifo_fd < 0) return;
 
-    char buffer[4096];
+    char buffer[8192];
     ssize_t bytesRead = ::read(fifo_fd, buffer, sizeof(buffer) - 1);
 
     if (bytesRead > 0) {
-        buffer[bytesRead] = '\0'; 
-        std::string input(buffer);
-        if (!input.empty() && input.back() == '\n') {
-            input.pop_back();
-        }
-
-        clear_lcd_buffer();
-        
-        std::stringstream ss(input);
+        buffer[bytesRead] = '\0';
+        std::stringstream ss(buffer);
         std::string line;
+        bool changed = false;
+        bool text_screen = false;
         int y = 0;
-        int line_height = 8; 
 
         while (std::getline(ss, line)) {
-            if (y + 7 > 48) break; 
-            write_text(2, y, line); 
-            y += line_height;
+            if (line.empty()) continue;
+
+            if (line[0] == '#') {
+                if (handle_lcd_command(line)) changed = true;
+                continue;
+            }
+
+            // Plain text, as it always was: the first such line starts a fresh screen
+            // and every following one goes below the previous.
+            if (!text_screen) {
+                clear_lcd_buffer();
+                text_screen = true;
+                y = 0;
+            }
+
+            if (y + 7 > 48) continue; // No room left on a 48 pixel screen.
+            write_text(2, y, line);
+            y += 8;
+            changed = true;
         }
 
-        write_lcd();
+        // One transfer per batch, so a screen built from several lines or commands is
+        // painted once instead of flickering line by line.
+        if (changed) write_lcd();
     }
+}
+
+/**
+ * @brief Applies one command from the LCD pipe.
+ *
+ * The commands exist so the screen can be used as a display rather than a text box:
+ * text can be placed anywhere, the screen can be cleared, and a raw 960 byte frame
+ * can be pushed for anything that is not text (bars, graphs, icons).
+ *
+ * @param line The command line.
+ * @return true if the screen changed and should be sent to the device.
+ */
+bool G13::handle_lcd_command(const std::string& line) {
+    std::stringstream args(line);
+    std::string command;
+    args >> command;
+
+    if (command == "#clear") {
+        clear_lcd_buffer();
+        return true;
+    }
+
+    if (command == "#text") {
+        int x = 0;
+        int y = 0;
+        args >> x >> y;
+
+        std::string text;
+        std::getline(args, text);
+        if (!text.empty() && text[0] == ' ') text.erase(0, 1);
+        if (text.empty()) return false;
+
+        write_text(x, y, text);
+        return true;
+    }
+
+    if (command == "#bitmap") {
+        // The frame buffer is 160x48 pixels, one bit each, stored as vertical bytes:
+        // byte x + (y / 8) * 160 covers the eight pixels of column x starting at row
+        // (y / 8) * 8, lowest row in bit 0.
+        std::string hex;
+        args >> hex;
+
+        if (hex.size() != G13_LCD_BUFFER_SIZE * 2) {
+            syslog(LOG_ERR, "LCD #bitmap needs %d hex digits, got %zu",
+                   G13_LCD_BUFFER_SIZE * 2, hex.size());
+            return false;
+        }
+
+        for (size_t i = 0; i < G13_LCD_BUFFER_SIZE; i++) {
+            lcd_buffer[i] = (uint8_t)strtol(hex.substr(i * 2, 2).c_str(), nullptr, 16);
+        }
+        return true;
+    }
+
+    syslog(LOG_ERR, "Unknown LCD command: %s", command.c_str());
+    return false;
 }
