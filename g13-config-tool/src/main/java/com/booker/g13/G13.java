@@ -40,6 +40,8 @@ public class G13 extends JPanel {
 	// Data storage
 	private final Properties[] keyBindings = new Properties[4]; // Holds the 4 binding profiles (M1, M2, M3, MR).
 	private final Properties[] macros = new Properties[MAX_MACROS]; // Holds all configured macros.
+	/** The profile currently shown on the keypad, for refreshing labels after edits. */
+	private int currentProfile = 0;
 	
 	/**
 	 * Constructor for the main G13 panel.
@@ -91,6 +93,9 @@ public class G13 extends JPanel {
 		// Provide the macro data to the panels that need it.
 		keybindPanel.setMacros(macros);
 		macroEditorPanel.setMacros(macros);
+
+		// Keep the keypad's key tooltips in step with edits made in the panel.
+		keybindPanel.setBindingChangeListener(() -> refreshKeyLabels(currentProfile));
 	}
 
 	/**
@@ -127,9 +132,19 @@ public class G13 extends JPanel {
 	 * @param bindingNum The index of the binding profile to apply (0-3).
 	 */
 	private void mapBindings(int bindingNum) {
+		currentProfile = bindingNum;
 		keybindPanel.setSelectedKey(null); // Deselect any key.
 		keybindPanel.setBindings(bindingNum, keyBindings[bindingNum]);
-		
+		refreshKeyLabels(bindingNum);
+	}
+
+	/**
+	 * Updates the per-key labels of the keypad view from a profile. Separate from
+	 * {@link #mapBindings(int)} so that edits can refresh the keypad without
+	 * resetting the key that is currently being edited.
+	 * @param bindingNum The index of the binding profile to display (0-3).
+	 */
+	private void refreshKeyLabels(int bindingNum) {
 		// Iterate through all possible G-keys to update their display text.
 		for (int i = 0; i < 40; i++) { 
 			final Key k = Key.getKeyFor(i);
@@ -144,7 +159,8 @@ public class G13 extends JPanel {
 			
 			if (val != null && !val.isBlank()) {
 				// The value string is parsed to determine the binding type and value.
-				// Format: "p,k.keycode" for passthrough, "m,macroNum,repeats" for macro.
+				// Format: "p,k.keycode" for passthrough, "m,macroNum,repeats" for macro,
+				// "mk,index" for an M key code.
 				String[] parts = val.split("[,.]");
 				if (parts.length < 2) continue; // Ignore invalid format.
 
@@ -166,6 +182,9 @@ public class G13 extends JPanel {
 								k.setRepeats(repeats ? "Yes" : "No");
 							}
 						}
+					} else if ("mk".equals(type)) { // M key code
+						int mKeyIndex = Integer.parseInt(parts[1]);
+						k.setMappedValue("M Key: " + JavaToLinuxKeymapping.mKeyShortName(mKeyIndex));
 					}
 				} catch (NumberFormatException e) {
 					// Handle cases where the number in the property is malformed.

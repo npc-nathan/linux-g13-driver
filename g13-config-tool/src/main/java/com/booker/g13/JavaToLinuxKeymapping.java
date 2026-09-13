@@ -153,11 +153,74 @@ public class JavaToLinuxKeymapping {
     }
 
     /**
+     * Linux event codes of the four M buttons, in M1, M2, M3, MR order. These are
+     * what the kernel emits for the same buttons (see drivers/hid/hid-lg-g15.c)
+     * and what the driver's "mk" binding type sends.
+     */
+    public static final int [] M_KEY_CODES = { 0x2b3, 0x2b4, 0x2b5, 0x2b0 };
+
+    /** Human readable names for {@link #M_KEY_CODES}. */
+    private static final String [] M_KEY_NAMES = {
+            "M1 (macro preset 1)", "M2 (macro preset 2)", "M3 (macro preset 3)", "MR (macro record)" };
+
+    /** Short names for {@link #M_KEY_CODES}, as printed on the device. */
+    private static final String [] M_KEY_SHORT_NAMES = { "M1", "M2", "M3", "MR" };
+
+    /**
+     * @param index The M key index (0 = M1, 1 = M2, 2 = M3, 3 = MR).
+     * @return true if the index is a valid M key index.
+     */
+    public static boolean isValidMKeyIndex(int index) {
+        return index >= 0 && index < M_KEY_CODES.length;
+    }
+
+    /**
+     * @param index The M key index.
+     * @return The Linux event code for that M key.
+     */
+    public static int mKeyCode(int index) {
+        return isValidMKeyIndex(index) ? M_KEY_CODES[index] : 0;
+    }
+
+    /**
+     * @param index The M key index.
+     * @return The device label for that M key, e.g. "M2".
+     */
+    public static String mKeyShortName(int index) {
+        return isValidMKeyIndex(index) ? M_KEY_SHORT_NAMES[index] : "M?";
+    }
+
+    /**
+     * @param index The M key index.
+     * @return The descriptive name for that M key, e.g. "M2 (macro preset 2)".
+     */
+    public static String mKeyName(int index) {
+        return isValidMKeyIndex(index) ? M_KEY_NAMES[index] : "Unknown M key";
+    }
+
+    /**
+     * @param keyCode A Linux event code.
+     * @return The M key index for that code, or -1 if it is not an M key code.
+     */
+    public static int mKeyIndexForCode(int keyCode) {
+        for (int i = 0; i < M_KEY_CODES.length; i++) {
+            if (M_KEY_CODES[i] == keyCode) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * Converts a Linux driver keycode to its human-readable string name.
      * @param keyCode The Linux keycode.
      * @return The string representation of the key (e.g., "F1", "Space").
      */
     public static String cKeyCodeToString(int keyCode) {
+        final int mKey = mKeyIndexForCode(keyCode);
+        if (mKey >= 0) {
+            return mKeyName(mKey);
+        }
         // Use getOrDefault for a safe fallback if the keycode is not found.
         return C_CODE_TO_DATA.getOrDefault(keyCode, new KeyMapping("Unknown (" + keyCode + ")", keyCode, -1))
                 .name();

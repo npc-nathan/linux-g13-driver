@@ -283,10 +283,13 @@ public class ImageMap extends JLabel {
         String[][] lines;
         // Display different information for profile buttons vs. regular keys.
         if (Key.isProfileKey(key.getG13KeyCode())) {
+            final boolean overridden = key.getMappedValue() != null && key.getMappedValue().startsWith("M Key:");
             lines = new String[][]{
                 {"G13 Key", Key.profileKeyName(key.getG13KeyCode())},
                 {"Configuration", "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"},
-                {"This button is reserved to load bindings", ""},
+                {overridden
+                        ? "Override: sends " + key.getMappedValue().substring("M Key:".length()).trim()
+                        : "This button is reserved to load bindings", ""},
             };
         } else {
             lines = new String[][]{
