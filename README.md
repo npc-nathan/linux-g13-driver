@@ -277,53 +277,23 @@ The tool's screen model mirrors the daemon's, and a test renders the same layout
 sides and compares the frames byte for byte - a preview that disagrees with the panel would
 be worse than no preview at all.
 
-### A game's own HUD
+Data sources are named in an applet's JSON: a plain name (`cpu`, `memory`, `time`, ...), or
+`env:NAME`, `file:PATH`, `cmd:COMMAND` and `json:PATH#FIELD` for anything else. `json:`
+reads one field of a JSON file - dotted for a nested field (`#route.turn`), a number for a
+list index (`#waypoints.0`), and with no `#` a file holding a single number or string is the
+value. A missing file, a missing field, unreadable JSON or a field that is not a scalar all
+read as empty, so whatever produces the file can stop without disturbing the screen.
+`json:` and `file:` are cached 0.2 s rather than the 2 s used for the rest, because a value
+being watched live should not lag the thing producing it.
 
-A game feeds the screen by writing a small JSON file, and the applet reads the fields it
-wants. `applets/cyberpunk-hud.json` is a working example: ammo, magazine, health, the
-current objective, and a turn arrow for the next corner.
+An applet can give its sources short names, so widgets and formats do not repeat a path -
+`"sources": {"ammo": "json:~/hud.json#ammo"}`, then `{"type": "text", "format": "AMMO {ammo}"}`.
 
-The game writes one field per thing the screen shows:
-
-    {"ammo": 24, "mag": 7, "health": 86, "objective": "Deliver the package to Vex",
-     "turn": -35, "distance": 240}
-
-Write it atomically - a temporary file renamed over the real one - so nobody ever reads
-half of it:
-
-    const temporary = path + ".tmp";
-    await fs.promises.writeFile(temporary, JSON.stringify(state));
-    await fs.promises.rename(temporary, path);   // atomic within a directory
-
-The applet then names each field once, so its widgets can say `{ammo}` rather than repeat a
-path:
-
-    "sources": {"ammo": "json:~/.local/share/cyberpunk-gta/hud.json#ammo"},
-    "widgets": [{"type": "text", "x": 70, "y": 12, "format": "AMMO {ammo:>3}"}]
-
-`json:<path>#<field>` reads one field: nested fields are dotted (`#route.turn`), a list
-index is a number (`#waypoints.0`), and with no `#` a file holding a single number or string
-is the value. A missing file, a field that is not there, or JSON being written at that
-moment all read as empty, so a closed game leaves blanks rather than taking the daemon down.
-
-Widgets a HUD wants, on top of `text`/`bar`/`line`/`vline`/`box`:
-
-- `segments` - a gauge in blocks (`count`, `max`), which reads at a glance when it is small;
-- `turn` - a corner arrow from an angle: straight on, left, right or double back, as four
-  shapes rather than a slight rotation, because at this size twenty degrees is one pixel;
-- `arrow` - a filled arrow at any bearing, for "the objective is that way";
-- `brackets` - corner marks round a widget;
-- `text` with `"scroll": true` - a line longer than the screen slides along instead of
-  being cut off.
-
-Fields are re-read every 0.2 s, so an applet with `"interval": 0.2` keeps up with a game.
-
-`tools/simulate-game-hud.py` writes that file with moving values, so a HUD can be designed
-and watched before the game itself knows anything about it:
-
-    python3 g13-visuals/tools/simulate-game-hud.py --path ~/.local/share/cyberpunk-gta/hud.json
-
-In a browser game it is the server that writes the file: a page has no filesystem access.
+Widgets: `text` (with `align`: left, centre or right, and `"scroll": true` for a line longer
+than the screen), `bar`, `segments` (a gauge drawn in blocks, `count` and `max`), `line`,
+`vline`, `box`, `brackets` (corner marks), `arrow` (a filled arrow at any bearing, 0 up and
+clockwise) and `turn` (a corner arrow: straight on, left, right or double back, as four
+shapes rather than a slight rotation - at this size twenty degrees is one pixel).
 
 ## Record mode (the MR button)
 
