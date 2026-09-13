@@ -29,6 +29,10 @@ private:
     int                   stick_keys[4];  
     int                   bindings;       // Active profile index (0..G13_NUM_PROFILES-1).
 
+    // 1 for keys the active profile assigns itself. Profile buttons that are
+    // assigned by the profile send that binding instead of switching profile.
+    std::vector<unsigned char> explicit_bindings;
+
     unsigned char lcd_buffer[G13_LCD_BUFFER_SIZE];
 
     // Feature: Live-Reload
@@ -39,6 +43,7 @@ private:
     // --- Private Methods ---
     std::unique_ptr<Macro> loadMacro(int id);
     void parse_bindings_from_stream(std::istream& stream);
+    void resetActions();
     int  read();
     void parse_joystick(unsigned char *buf);
     void parse_key(int key, unsigned char *byte);

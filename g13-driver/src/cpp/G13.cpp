@@ -37,6 +37,17 @@ std::string trim_string(const std::string& str) {
     return str.substr(start, end - start + 1);
 }
 
+// Linux event codes for the four M keys, in profile order (M1, M2, M3, MR).
+static int mkeyCodeFor(int index) {
+    switch (index) {
+    case 0: return G13_KEYCODE_MACRO_PRESET1;
+    case 1: return G13_KEYCODE_MACRO_PRESET2;
+    case 2: return G13_KEYCODE_MACRO_PRESET3;
+    case 3: return G13_KEYCODE_MACRO_RECORD_START;
+    default: return 0;
+    }
+}
+
 G13::G13(libusb_device *device) {
     this->device = device;
     this->loaded = 0;
@@ -51,6 +62,7 @@ G13::G13(libusb_device *device) {
     for (int i = 0; i < G13_NUM_KEYS; i++) {
         actions[i] = std::make_unique<G13Action>();
     }
+    explicit_bindings.assign(G13_NUM_KEYS, 0);
 
     if (libusb_open(device, &handle) != 0) {
         syslog(LOG_ERR, "Error opening G13 device");
@@ -232,7 +244,20 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
                         int keycode = std::stoi(keytype_str.substr(2));
                         if (gKey >= 0 && gKey < G13_NUM_KEYS) {
                              actions[gKey] = std::make_unique<PassThroughAction>(keycode);
+                             explicit_bindings[gKey] = 1;
                         }
+                    }
+                }
+                else if (type == "mk") {
+                    // Emit the Linux code of one of the M buttons instead of a
+                    // normal key. Used for "M key" bindings and for overriding a
+                    // profile button inside a profile.
+                    std::string index_str;
+                    if (!std::getline(ss, index_str, ',')) continue;
+                    int index = std::stoi(trim_string(index_str));
+                    if (index >= 0 && index < G13_NUM_PROFILES && gKey >= 0 && gKey < G13_NUM_KEYS) {
+                        actions[gKey] = std::make_unique<PassThroughAction>(mkeyCodeFor(index));
+                        explicit_bindings[gKey] = 1;
                     }
                 }
                 else if (type == "m") { 
@@ -246,6 +271,7 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
                         if (macro && gKey >= 0 && gKey < G13_NUM_KEYS) {
                             actions[gKey] = std::make_unique<MacroAction>(macro->getSequence());
                             static_cast<MacroAction*>(actions[gKey].get())->setRepeats(repeats);
+                            explicit_bindings[gKey] = 1;
                         }
                     }
                 }
@@ -254,7 +280,25 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
     }
 }
 
+// Drops every binding of the previously loaded profile. Keys that were held are
+// released first, otherwise a live reload could leave them stuck down.
+void G13::resetActions() {
+    if (actions.size() != G13_NUM_KEYS) return;
+
+    for (int i = 0; i < G13_NUM_KEYS; i++) {
+        if (actions[i] && actions[i]->isPressed()) {
+            actions[i]->set(0);
+        }
+        actions[i] = std::make_unique<G13Action>();
+        explicit_bindings[i] = 0;
+    }
+}
+
 void G13::loadBindings() {
+    // The file is the whole truth for this profile: drop the previous bindings
+    // (including any key the file no longer mentions) before parsing it.
+    resetActions();
+
     // NEW: Use ConfigPath helper
     std::string filename = ConfigPath::getBindingPath(bindings);
 
@@ -394,15 +438,17 @@ void G13::parse_key(int key, unsigned char *byte) {
     switch (key) {
     // Profile buttons: M1, M2, M3 and MR sit on report bits 29-32 and select
     // bindings-0..3. Pressing the key also re-reads the file, so it doubles
-    // as a manual reload.
+    // as a manual reload. A profile that binds the button itself (the "mk"
+    // binding type) overrides the switch and sends that binding instead.
     case G13_KEY_M1:
     case G13_KEY_M2:
     case G13_KEY_M3:
     case G13_KEY_MR:
-        if (pressed) {
+        if (!explicit_bindings[key] && pressed) {
             selectProfile(key - G13_KEY_M1);
+            return;
         }
-        return;
+        break;
 
     // Legacy: before the M buttons were wired up, the four display buttons
     // (L1-L4, bits 25-28) selected the same profiles. They keep working as
@@ -411,10 +457,11 @@ void G13::parse_key(int key, unsigned char *byte) {
     case G13_KEY_L2:
     case G13_KEY_L3:
     case G13_KEY_L4:
-        if (pressed) {
+        if (!explicit_bindings[key] && pressed) {
             selectProfile(key - G13_KEY_L1);
+            return;
         }
-        return;
+        break;
 
     // Stick directions are handled by parse_joystick().
     case 36: case 37: case 38: case 39:

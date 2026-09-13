@@ -13,6 +13,14 @@
 #define G13_NUM_KEYS 40         // Total number of logical keys, including stick directions.
 #define G13_NUM_PROFILES 4      // Number of binding profiles: M1, M2, M3 and MR.
 
+// Linux event codes sent by the "M key" binding type (mk,<index>) and by profile
+// buttons that the active profile overrides. These are the codes the mainline
+// kernel emits for the same buttons (drivers/hid/hid-lg-g15.c, g13_keys_for_bits[]).
+#define G13_KEYCODE_MACRO_RECORD_START 0x2b0
+#define G13_KEYCODE_MACRO_PRESET1      0x2b3
+#define G13_KEYCODE_MACRO_PRESET2      0x2b4
+#define G13_KEYCODE_MACRO_PRESET3      0x2b5
+
 /**
  * @enum stick_mode_t
  * @brief Defines the operating modes for the G13's joystick.

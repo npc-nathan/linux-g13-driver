@@ -115,6 +115,14 @@ bool UInput::create_uinput() {
 	// Enable all possible key codes
 	for (int i = 0; i < 256; i++)
 		ioctl(file, UI_SET_KEYBIT, i);
+
+	// The M key codes live above 255; the "mk" binding type and profile-button
+	// overrides emit them, so the virtual device has to advertise them.
+	ioctl(file, UI_SET_KEYBIT, G13_KEYCODE_MACRO_RECORD_START);
+	ioctl(file, UI_SET_KEYBIT, G13_KEYCODE_MACRO_PRESET1);
+	ioctl(file, UI_SET_KEYBIT, G13_KEYCODE_MACRO_PRESET2);
+	ioctl(file, UI_SET_KEYBIT, G13_KEYCODE_MACRO_PRESET3);
+
 	ioctl(file, UI_SET_KEYBIT, BTN_THUMB);
 
 	// Write configuration
