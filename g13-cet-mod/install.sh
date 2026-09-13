@@ -16,12 +16,43 @@ APPLETS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/g13/applets"
 APPLET_NAME="cp2077-hud.json"
 MOD_NAME="g13-hud"
 
+# Where the game usually is, in the order to try. A Wine/Proton prefix puts the game under
+# drive_c, so pass that path explicitly if the game lives inside one.
+CANDIDATES=(
+    "$HOME/Games/Heroic/Cyberpunk 2077"
+    "$HOME/.local/share/Steam/steamapps/common/Cyberpunk 2077"
+    "$HOME/.steam/steam/steamapps/common/Cyberpunk 2077"
+    "$HOME/GOG Games/Cyberpunk 2077"
+    "$HOME/Games/Cyberpunk 2077"
+)
+
+find_game() {
+    for candidate in "${CANDIDATES[@]}"; do
+        if [ -d "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 REMOVE=0
 if [ "${1:-}" = "--remove" ]; then
     REMOVE=1
-    GAME="${2:-$HOME/Games/Heroic/Cyberpunk 2077}"
+    GAME="${2:-$(find_game || printf '%s' "${CANDIDATES[0]}")}"
+elif [ -n "${1:-}" ]; then
+    GAME="$1"
 else
-    GAME="${1:-$HOME/Games/Heroic/Cyberpunk 2077}"
+    if ! GAME="$(find_game)"; then
+        echo "no Cyberpunk 2077 installation found in the usual places:"
+        for candidate in "${CANDIDATES[@]}"; do
+            echo "  $candidate"
+        done
+        echo
+        echo "pass the path: $0 \"/path/to/Cyberpunk 2077\""
+        exit 1
+    fi
+    echo "using the game at: $GAME"
 fi
 
 MODS_DIR="$GAME/bin/x64/plugins/cyber_engine_tweaks/mods"

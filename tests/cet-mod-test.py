@@ -104,12 +104,13 @@ def main():
 
             text = [placement[2] for placement in screen.texts]
             joined = " | ".join(text)
-            # The objective slides along in a 25-character window, so the phrase is checked in
-            # part rather than whole. Health is a bar, not text, so the label is what to look
-            # for there.
+            # The objective slides along a 25-character window, and which part is showing
+            # depends on the clock, so look for a word that this 26-character phrase always
+            # has inside any such window. The Lua test above already checks the whole string.
             check("the applet draws the mod's data", True,
-                  ("Deliver the package" in joined) and ("AMMO" in joined))
+                  ("Deliver" in joined or "Vex" in joined) and ("AMMO" in joined))
             check("and the level from the mod's file", True, "LVL 32" in joined)
+            check("and the line the mod made up for it", True, "PIN 5m  Watson" in joined)
 
             # The text-on-ink rule itself lives in VisualsTest.py, which applies it to every
             # applet in the repo - including this one - when the suite runs. One owner for the

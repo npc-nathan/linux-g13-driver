@@ -71,6 +71,7 @@ entries to `/usr/share/applications`, and the user units to `/usr/lib/systemd/us
 
 ```bash
 sudo make install
+sudo make install-udev       # optional: ship the udev rule to /usr/lib/udev/rules.d
 ```
 
 Nothing is started for you: a system install never touches your session. Enable the three
@@ -79,6 +80,8 @@ user services once:
 ```bash
 systemctl --user enable --now g13 g13-visuals g13-lcd-bridge
 ```
+
+To take it all back out: `sudo make uninstall` (see **Uninstallation** at the end).
 
 #### Option B: User-Local Installation (Developer Mode)
 Everything goes into `~/.local` (`bin`, `lib`, `include`, `share/applications`) and the units
@@ -91,7 +94,8 @@ make install-udev       # once, separately: the udev rule needs sudo
 
 `install-user` deliberately runs no `sudo`: the only step that needs root is the udev rule in
 `/etc`, and keeping it out means a reinstall never asks for a password. To bring the services
-back after a change, `make enable-services` (or `g13-service start all`).
+back after a change, `make enable-services` (or `g13-service start all`). To take it back out:
+`make uninstall-user` — it leaves your configuration in `~/.config/g13` alone.
 
 ### What gets installed
 
@@ -109,6 +113,10 @@ back after a change, `make enable-services` (or `g13-service start all`).
 
 The menu entries (`G13 Configuration`, `G13 Start Driver`, `G13 Stop Driver`, `G13 Start All`,
 `G13 Stop All`) land in your applications menu.
+
+Nothing above touches a game. The Cyberpunk 2077 screen is a **separate, optional install**
+that writes into the game's own directory, with its own installer and its own walkthrough:
+[`g13-cet-mod/README.md`](g13-cet-mod/README.md).
 
 Note on permissions: the udev rule lets the driver claim the device without sudo, and makes
 the driver's own virtual keyboard readable by the `plugdev` group, so `evtest` and
@@ -301,8 +309,12 @@ then shows the last frame the visuals drew, not what is on the panel.
 The pad can show a game's own numbers. `g13-cet-mod/` is a Cyber Engine Tweaks mod that writes
 the game's state to a small JSON file about five times a second:
 
+**→ Full walkthrough, for anyone installing it: [`g13-cet-mod/README.md`](g13-cet-mod/README.md)**
+— what you need, where the game lives on Steam/Heroic/GOG or inside a Wine prefix, how to check
+it worked, what to do when a field is blank, and how to take it out again.
+
 ```bash
-./g13-cet-mod/install.sh                       # default game: ~/Games/Heroic/Cyberpunk 2077
+./g13-cet-mod/install.sh                       # finds the game in the usual places
 ./g13-cet-mod/install.sh "/path/to/Cyberpunk 2077"
 ./g13-cet-mod/install.sh --remove              # takes the mod and the applet away again
 ```
@@ -554,13 +566,25 @@ Currently, only one font size is implemented. There is an example script for sys
 
 ### Uninstallation
 
-To remove the driver and all installed files:
+Remove the driver and everything its install put on your system:
 
 ```bash
-make uninstall
+cd g13-driver/src && make uninstall-user     # the user-local install (Option B)
+make uninstall                               # the system-wide install (Option A, as root)
+make uninstall-udev                          # the udev rule in /etc (needs sudo)
 ```
 
-(Note: This removes the binaries, UDEV rules, and service files, but keeps your configuration in ~/.config/g13 to prevent data loss.)
+`uninstall-user` stops and disables the three services, then removes the binaries, the SDK
+library and header, the service files and the menu entries. **Your configuration in
+`~/.config/g13` is kept** — bindings, macros, visuals and applets all survive, so reinstalling
+changes nothing you set up. Delete that directory by hand if you want it gone as well.
+
+The Cyberpunk 2077 mod is not part of the driver's own install — it writes inside a game
+directory, so it is installed and removed on its own:
+
+```bash
+./g13-cet-mod/install.sh --remove
+```
 
 
 ## Testing

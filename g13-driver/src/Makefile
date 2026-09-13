@@ -246,3 +246,50 @@ clean-build:
 clean: clean-build
 	rm -f $(TARGET_PATH)
 	cd $(GUI_ROOT) && mvn clean
+
+
+# =============================================================================
+# Uninstallation
+# The mirror of the two install targets above: every path they write is removed
+# here. Your configuration in $(USER_CONFIG_DIR) is kept, so reinstalling does
+# not lose bindings, macros, visuals or applets.
+# =============================================================================
+
+# Everything both install targets put in a bin directory.
+INSTALLED_BINS := linux-g13-driver g13-gui $(GUI_JAR_NAME) g13-keywatch g13-lcd g13-watch \
+                  g13-buttons g13lcd.py g13-visuals g13-lcd-bridge g13-service
+INSTALLED_UNITS := g13.service g13-visuals.service g13-lcd-bridge.service
+
+uninstall-user:
+	@echo "--- Removing the user-local install ---"
+	-systemctl --user disable --now $(INSTALLED_UNITS)
+	for name in $(INSTALLED_BINS); do rm -f "$(USER_INSTALL_DIR)/$$name"; done
+	rm -f $(HOME)/.local/lib/liblogitechlcd.so
+	rm -f $(HOME)/.local/include/LogitechLcd.h
+	for unit in $(INSTALLED_UNITS); do rm -f "$(USER_SYSTEMD_DIR)/$$unit"; done
+	for entry in ../../desktop/*.desktop; do \
+		rm -f "$(USER_APPS_DIR)/$$(basename "$$entry")"; \
+	done
+	-systemctl --user daemon-reload
+	-command -v update-desktop-database >/dev/null && update-desktop-database $(USER_APPS_DIR)
+	@echo "Removed: binaries, SDK library and header, service files, menu entries."
+	@echo "Kept:    $(USER_CONFIG_DIR) (bindings, macros, visuals, applets)."
+
+uninstall-udev:
+	@echo "--- Removing the udev rule (sudo required) ---"
+	sudo rm -f /etc/udev/rules.d/99-g13.rules
+	sudo udevadm control --reload-rules && sudo udevadm trigger
+
+uninstall:
+	@echo "--- Removing the system install from $(DESTDIR)$(PREFIX) ---"
+	for name in $(INSTALLED_BINS); do rm -f "$(DESTDIR)$(BINDIR)/$$name"; done
+	rm -f $(DESTDIR)$(JAVADIR)/$(GUI_JAR_NAME)
+	rm -f $(DESTDIR)$(LIBDIR)/liblogitechlcd.so
+	rm -f $(DESTDIR)$(INCLUDEDIR)/LogitechLcd.h
+	rm -f $(DESTDIR)$(UDEVDIR)/99-g13.rules
+	for unit in $(INSTALLED_UNITS); do rm -f "$(DESTDIR)$(SYSTEMDDIR)/$$unit"; done
+	for entry in ../../desktop/*.desktop; do \
+		rm -f "$(DESTDIR)$(APPDIR)/$$(basename "$$entry")"; \
+	done
+	@echo "Removed. Disable the services if they were enabled:"
+	@echo "  systemctl --user disable $(INSTALLED_UNITS)"
