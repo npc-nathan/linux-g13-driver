@@ -1,0 +1,13 @@
+{
+  "name": "demo-stats",
+  "title": "STATS",
+  "interval": 1,
+  "widgets": [
+    {"type": "text", "x": 3, "y": 12, "format": "CPU {cpu:.0f}%"},
+    {"type": "bar", "x": 28, "y": 12, "w": 88, "h": 9, "source": "cpu", "max": 100},
+    {"type": "text", "x": 3, "y": 23, "format": "MEM {memory:.0f}%"},
+    {"type": "bar", "x": 28, "y": 23, "w": 88, "h": 9, "source": "memory", "max": 100},
+    {"type": "line", "x": 1, "y": 34, "w": 158},
+    {"type": "text", "x": 3, "y": 36, "format": "{day} {date}  up {uptime}"}
+  ]
+}

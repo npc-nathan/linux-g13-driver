@@ -29,6 +29,7 @@ Visuals:
 import json
 import os
 import socket
+import string
 import subprocess
 import sys
 import time
@@ -276,6 +277,268 @@ class CustomVisual:
 VISUALS = [ClockVisual(), SystemVisual(), MediaVisual(), PadVisual(), CustomVisual()]
 VISUALS_BY_NAME = {visual.name: visual for visual in VISUALS}
 
+APPLET_PREFIX = "applet:"
+
+# --- data a designed applet can show ---
+
+
+def shell(command, timeout=0.4):
+    """Runs a command for its output, or None if it fails or takes too long."""
+    try:
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+class Values:
+    """The live numbers and strings an applet can put on the screen.
+
+    Sources are named in the applet's JSON: a plain name (cpu, memory, time, ...), or
+    file:<path>, cmd:<shell command> and env:<name> for anything else. Expensive ones are
+    cached for a short while, because a visual redraws every second or so and shelling out
+    that often for a clock would be silly.
+    """
+
+    CACHE_SECONDS = 2.0
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.cache = {}
+        self.cpu_previous = None
+        self.context = {}
+
+    def set_context(self, **context):
+        """State the driver told us about: recording, profile, recent presses."""
+        self.context.update(context)
+
+    def cpu_percent(self):
+        with open("/proc/stat") as handle:
+            fields = [int(value) for value in handle.readline().split()[1:]]
+        idle = fields[3] + fields[4]
+        total = sum(fields)
+        if self.cpu_previous is None:
+            self.cpu_previous = (idle, total)
+            return 0.0
+        idle_delta = idle - self.cpu_previous[0]
+        total_delta = total - self.cpu_previous[1]
+        self.cpu_previous = (idle, total)
+        if total_delta <= 0:
+            return 0.0
+        return 100.0 * (total_delta - idle_delta) / total_delta
+
+    def memory_percent(self):
+        values = {}
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                key, _, rest = line.partition(":")
+                values[key] = int(rest.split()[0])
+        total = values.get("MemTotal", 1)
+        return 100.0 * (total - values.get("MemAvailable", 0)) / total
+
+    def uptime_seconds(self):
+        with open("/proc/uptime") as handle:
+            return float(handle.read().split()[0])
+
+    def media(self):
+        line = shell("playerctl metadata --format '{{status}}|{{artist}}|{{title}}|"
+                     "{{position}}|{{mpris:length}}'") if self.which("playerctl") else None
+        parts = (line.split("|") + [""] * 5)[:5] if line else ["", "", "", "", ""]
+        duration = 0
+        try:
+            duration = int(parts[4]) // 1_000_000
+        except ValueError:
+            pass
+        return parts, duration
+
+    @staticmethod
+    def which(program):
+        return any(os.access(os.path.join(path, program), os.X_OK)
+                   for path in os.environ.get("PATH", "").split(os.pathsep))
+
+    def raw(self, source):
+        now = self.clock()
+        cached = self.cache.get(source)
+        if cached and now - cached[0] < self.CACHE_SECONDS:
+            return cached[1]
+
+        value = self.resolve(source)
+        self.cache[source] = (now, value)
+        return value
+
+    def resolve(self, source):
+        now = datetime.now()
+        uptime = self.uptime_seconds()
+        media, duration = self.media()
+        position = 0
+        try:
+            position = int(media[3]) // 1_000_000
+        except ValueError:
+            pass
+
+        built_in = {
+            "cpu": self.cpu_percent,
+            "memory": self.memory_percent,
+            "load": lambda: float(open("/proc/loadavg").read().split()[0]),
+            "uptime": lambda: "%dh%02dm" % (int(uptime // 3600), int(uptime % 3600) // 60),
+            "uptime_seconds": lambda: uptime,
+            "time": lambda: now.strftime("%H:%M"),
+            "time_seconds": lambda: now.strftime("%H:%M:%S"),
+            "date": lambda: now.strftime("%d/%m/%Y"),
+            "day": lambda: now.strftime("%a"),
+            "media_status": lambda: media[0],
+            "media_artist": lambda: media[1],
+            "media_title": lambda: media[2],
+            "media_position": lambda: "%d:%02d" % (position // 60, position % 60),
+            "media_duration": lambda: "%d:%02d" % (duration // 60, duration % 60),
+            "media_percent": lambda: (100.0 * position / duration) if duration else 0.0,
+            "profile": lambda: "M%d" % (int(self.context.get("profile", 0)) + 1),
+            "recording": lambda: "yes" if self.context.get("recording") else "no",
+            "last_key": lambda: (self.context.get("recent") or ["-"])[-1],
+            "recent_keys": lambda: " ".join(self.context.get("recent", [])),
+            "screen_width": lambda: g13lcd.VISIBLE_WIDTH,
+            "screen_height": lambda: g13lcd.VISIBLE_HEIGHT,
+        }
+
+        if source in built_in:
+            return built_in[source]()
+
+        if source.startswith("env:"):
+            return os.environ.get(source[4:], "")
+
+        if source.startswith("file:"):
+            try:
+                with open(os.path.expanduser(source[5:])) as handle:
+                    return handle.readline().strip()
+            except OSError:
+                return ""
+
+        if source.startswith("cmd:"):
+            return shell(source[4:]) or ""
+
+        return ""
+
+    def all(self, sources):
+        """Resolves several sources at once, for the values file."""
+        return {source: self.raw(source) for source in sources}
+
+
+class LayoutVisual:
+    """A visual described by JSON rather than by code: the applet designer's output.
+
+    Widgets are placed on the screen and bound to data::
+
+        {"name": "stats", "title": "STATS", "interval": 1,
+         "widgets": [
+            {"type": "text", "x": 3, "y": 12, "format": "CPU {cpu:.0f}%"},
+            {"type": "bar",  "x": 28, "y": 12, "w": 88, "h": 8, "source": "cpu", "max": 100},
+            {"type": "line", "x": 1, "y": 30, "w": 158},
+            {"type": "box",  "x": 1, "y": 18, "w": 158, "h": 10}]}
+
+    `format` is a str.format template over every value (so one label can show several), and
+    `source` is the single value a bar uses.
+    """
+
+    def __init__(self, definition, values):
+        self.definition = definition
+        self.values = values
+        self.name = APPLET_PREFIX + str(definition.get("name", "applet"))
+        self.interval = float(definition.get("interval", 1.0))
+
+    @property
+    def title(self):
+        return str(self.definition.get("title", self.definition.get("name", "APPLET")))
+
+    def sources(self):
+        """Every data source this applet asks for."""
+        wanted = set()
+        for widget in self.definition.get("widgets", []):
+            if widget.get("source"):
+                wanted.add(widget["source"])
+            for _literal, field, _spec, _conversion in string.Formatter().parse(
+                    widget.get("format") or ""):
+                if field:
+                    wanted.add(field.split(".")[0].split("[")[0])
+        return sorted(wanted)
+
+    def value_of(self, source):
+        if source is None:
+            return ""
+        return self.values.raw(source)
+
+    def render(self, screen, context):
+        border = self.definition.get("border", True)
+        if border:
+            screen.frame_and_title(self.title)
+        values = self.values.all(self.sources())
+
+        for widget in self.definition.get("widgets", []):
+            kind = widget.get("type", "text")
+            x = int(widget.get("x", 0))
+            y = int(widget.get("y", 0))
+
+            if kind == "text":
+                template = widget.get("format")
+                if template is None:
+                    message = str(self.value_of(widget.get("source")))
+                    if widget.get("align") == "centre":
+                        x = centred(message)
+                else:
+                    try:
+                        message = template.format(**values)
+                    except (KeyError, ValueError, IndexError):
+                        message = "?"
+                screen.text(x, y, message)
+
+            elif kind == "bar":
+                top = float(widget.get("max", 100)) or 100
+                try:
+                    percent = 100.0 * float(self.value_of(widget.get("source"))) / top
+                except (TypeError, ValueError):
+                    percent = 0
+                screen.bar(x, y, int(widget.get("w", 88)), int(widget.get("h", 8)), percent)
+
+            elif kind == "line":
+                screen.rect(x, y, x + int(widget.get("w", 158)), y + 1)
+
+            elif kind == "box":
+                screen.rect(x, y, x + int(widget.get("w", 158)), y + int(widget.get("h", 10)))
+
+            elif kind == "vline":
+                screen.rect(x, y, x + 1, y + int(widget.get("h", 10)))
+
+
+def applet_dir():
+    return config_dir() / "applets"
+
+
+def load_applets(values):
+    """Every designed applet in the applets directory, newest content each call."""
+    applets = {}
+    directory = applet_dir()
+    if not directory.is_dir():
+        return applets
+
+    for path in sorted(directory.glob("*.json")):
+        try:
+            definition = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            print("skipping %s: %s" % (path, error), file=sys.stderr)
+            continue
+        definition.setdefault("name", path.stem)
+        visual = LayoutVisual(definition, values)
+        applets[visual.name] = visual
+    return applets
+
+
+def registry(values):
+    """The built-in visuals plus every designed applet."""
+    visuals = {visual.name: visual for visual in VISUALS}
+    visuals.update(load_applets(values))
+    return visuals
+
 
 class Engine:
     """Turns button presses into a screen.
@@ -283,13 +546,16 @@ class Engine:
     Kept free of sockets and timers so it can be driven directly in tests.
     """
 
-    def __init__(self, config=None, clock=time.monotonic):
+    def __init__(self, config=None, clock=time.monotonic, visuals=None, values=None):
         self.clock = clock
+        self.values = values
+        self.visuals = visuals if visuals is not None else {item.name: item for item in VISUALS}
         self.config = config or {}
-        self.enabled = [name for name in self.config.get("enabled", [v.name for v in VISUALS])
-                        if name in VISUALS_BY_NAME] or [VISUALS[0].name]
+        available = list(self.visuals)
+        self.enabled = [name for name in self.config.get("enabled", available)
+                        if name in self.visuals] or available[:1]
         self.active = self.config.get("active", self.enabled[0])
-        if self.active not in VISUALS_BY_NAME:
+        if self.active not in self.visuals:
             self.active = self.enabled[0]
         self.cycle = bool(self.config.get("cycle", False))
         self.cycle_seconds = float(self.config.get("cycle_seconds", 10))
@@ -319,11 +585,12 @@ class Engine:
     def menu_items(self):
         items = [("cycle", "Auto-cycle: %s" % ("on" if self.cycle else "off"))]
         for name in self.enabled:
-            items.append((name, VISUALS_BY_NAME[name].name.title()))
+            title = getattr(self.visuals[name], "title", name)
+            items.append((name, str(title)[:24]))
         return items
 
     def switch_to(self, name):
-        if name in VISUALS_BY_NAME:
+        if name in self.visuals:
             self.active = name
             self.last_cycle_at = self.clock()
 
@@ -401,14 +668,18 @@ class Engine:
             self.next_visual()
 
         screen = Screen()
+        context = {
+            "recording": self.recording,
+            "profile": self.profile,
+            "recent": self.recent,
+        }
+        if self.values is not None:
+            self.values.set_context(**context)
+
         if self.menu_open:
             self.render_menu(screen)
         else:
-            VISUALS_BY_NAME[self.active].render(screen, {
-                "recording": self.recording,
-                "profile": self.profile,
-                "recent": self.recent,
-            })
+            self.visuals[self.active].render(screen, context)
         return screen.lines()
 
     def render_menu(self, screen):
@@ -438,7 +709,7 @@ class Engine:
 
     def interval(self):
         """How long until this visual needs redrawing."""
-        return 1.0 if self.menu_open else VISUALS_BY_NAME[self.active].interval
+        return 1.0 if self.menu_open else self.visuals[self.active].interval
 
 
 def read_config():
@@ -458,8 +729,35 @@ def write_config(snapshot):
         print("could not save %s: %s" % (path, error), file=sys.stderr)
 
 
+PUBLISHED_SOURCES = [
+    "cpu", "memory", "load", "uptime", "uptime_seconds", "time", "time_seconds", "date",
+    "day", "media_status", "media_artist", "media_title", "media_position",
+    "media_duration", "media_percent", "profile", "recording", "last_key", "recent_keys",
+    "screen_width", "screen_height",
+]
+
+
+def publish(lines, values):
+    """Publishes what is on the screen, and the live values, for the config tool.
+
+    The tool cannot read the panel, so this is how its preview shows the real thing and
+    how the applet designer previews a design against live data.
+    """
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    try:
+        with open(os.path.join(runtime, "g13-screen"), "w") as handle:
+            handle.write("\n".join(lines) + "\n")
+        with open(os.path.join(runtime, "g13-values.json"), "w") as handle:
+            json.dump(values, handle, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
+
 def main():
-    engine = Engine(read_config())
+    values = Values()
+    visuals = registry(values)
+    engine = Engine(read_config(), visuals=visuals, values=values)
+
     config_stamp = None
     last_poll = 0.0
     last_drawn = 0.0
@@ -505,7 +803,7 @@ def main():
 
             now = time.monotonic()
 
-            # --- pick up config changes made elsewhere (the config tool) ---
+            # --- pick up applets and config changes made elsewhere (the config tool) ---
             if now - last_poll >= CONFIG_POLL_SECONDS:
                 last_poll = now
                 path = config_dir() / "visuals.json"
@@ -513,16 +811,35 @@ def main():
                     stamp = path.stat().st_mtime
                 except OSError:
                     stamp = None
-                if stamp != config_stamp and stamp is not None:
+
+                if stamp != config_stamp:
                     config_stamp = stamp
-                    fresh = Engine(read_config(), clock=engine.clock)
-                    if fresh.snapshot() != engine.snapshot():
+                    fresh_visuals = registry(values)
+                    fresh = Engine(read_config(), clock=engine.clock,
+                                   visuals=fresh_visuals, values=values)
+                    # Keep the current visual if it still exists, so editing an applet
+                    # does not bounce the screen back to the first one.
+                    if engine.active in fresh.visuals and engine.active != fresh.active:
+                        fresh.active = engine.active
+                        fresh.enabled = [name for name in fresh.enabled] or [engine.active]
+                        if engine.active not in fresh.enabled:
+                            fresh.enabled.append(engine.active)
+                    if fresh.snapshot() != engine.snapshot() or set(fresh.visuals) != set(engine.visuals):
                         engine = fresh
                         dirty = True
 
             # --- draw when the visual asks for it, or straight after a button ---
             if dirty or now - last_drawn >= engine.interval():
-                g13lcd.send(engine.tick())
+                lines = engine.tick()
+                g13lcd.send(lines)
+
+                sources = list(PUBLISHED_SOURCES)
+                active = engine.visuals.get(engine.active)
+                if isinstance(active, LayoutVisual):
+                    sources += [source for source in active.sources()
+                                if not source.startswith("cmd:")]
+                publish(lines, values.all(sources))
+
                 last_drawn = now
                 if shown_state != engine.snapshot():
                     shown_state = engine.snapshot()

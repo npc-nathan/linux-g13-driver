@@ -224,6 +224,41 @@ it - the text would vanish into it. The selected row gets a marker bar beside th
 a line underneath instead, and every visual keeps its text on blank pixels. That rule is
 enforced by the tests, not just by convention.
 
+### Designed applets
+
+An applet is a JSON file in `$XDG_CONFIG_HOME/g13/applets/`: widgets placed on the screen
+and bound to live data. It appears in the menu under its `title` as soon as it is listed in
+`enabled` in `visuals.json`.
+
+```json
+{
+  "name": "demo-stats", "title": "STATS", "interval": 1,
+  "widgets": [
+    {"type": "text", "x": 3,  "y": 12, "format": "CPU {cpu:.0f}%"},
+    {"type": "bar",  "x": 28, "y": 12, "w": 88, "h": 9, "source": "cpu", "max": 100},
+    {"type": "line", "x": 1,  "y": 34, "w": 158},
+    {"type": "box",  "x": 1,  "y": 22, "w": 157, "h": 10}
+  ]
+}
+```
+
+Widgets: `text` (a `format` template, or `source` on its own), `bar` (`source`, `max`),
+`line`, `vline`, `box`.
+
+Sources: `cpu`, `memory`, `load`, `uptime`, `uptime_seconds`, `time`, `time_seconds`,
+`date`, `day`, `media_status`, `media_artist`, `media_title`, `media_position`,
+`media_duration`, `media_percent`, `profile`, `recording`, `last_key`, `recent_keys`,
+`screen_width`, `screen_height`, plus `env:NAME`, `file:PATH` (first line) and
+`cmd:SHELL COMMAND` (cached 2 s, 0.4 s timeout) for anything else.
+
+`format` is a `str.format` template over all of the values at once, so one label can show
+several: `"{day} {date} {time}"`. A worked example ships in
+`g13-visuals/applets/example-stats.json`.
+
+The daemon publishes what it is drawing to `$XDG_RUNTIME_DIR/g13-screen` and the live
+values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool's preview shows
+the real screen and how the applet designer previews against live data.
+
 ## Record mode (the MR button)
 
 Press **MR** on the pad while the config tool is open:
