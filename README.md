@@ -19,7 +19,7 @@ You need to install the following packages via your package manager:
 * `cmake`
 * `gtk3` / `gtk3-devel`
 * `libusb-1.0-0` (on some distros named `libusb-1.0-0-dev` or `libusb1-devel`)
-* `libappindicator-gtk3` (or similar)
+* `libappindicator-gtk3` (or `libayatana-appindicator3-dev` on Debian/Ubuntu 22.04+)
 * `Java 17` or higher
 * `python-psutil` (for the monitor script)
 
@@ -109,23 +109,30 @@ g13-gui
 
 This will bring up the UI.
 
-Profiles: The top 4 buttons under the LCD (M1, M2, M3, MR) switch between binding profiles.
+Profiles: The **M1, M2, M3 and MR** buttons switch between the four binding
+profiles `bindings-0.properties` … `bindings-3.properties`. The four display
+buttons (L1-L4) still select the same profiles as aliases.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
-Live Reload: The driver automatically detects file changes and reloads the config immediately.
+Live Reload: The driver detects changes to the **currently active** bindings
+file and reloads it within a second — no restart needed. Pressing a profile
+button re-reads it as well. Changes made to a profile you are not currently on
+take effect when you switch to it.
+
+Active profile: The last selected profile is stored in
+`~/.config/g13/active-profile` (a plain integer, 0-3) so the driver comes back
+on it after a restart or a replug. Delete the file to fall back to profile 0.
 
 ![Config Tool Screenshot](docs/ConfigTool.png)
 
-The top 4 buttons under the LCD screen select the bindings (M1-M3, MR).
-
-> **Important:** If you configure the application while the driver is running, the driver will not pick up changes unless you select a different binding set or restart the driver.
+The M1, M2, M3 and MR buttons select the bindings.
 
 ### Use the built-in Mapping Set (for external tools)
 
 The driver now includes a fixed default mapping. This means the GUI is not strictly necessary if you prefer other tools. You can map the keys using software like **Input Remapper**.
 
-*(Note: The quick profile change via the four small buttons under the display only works when using the G13 GUI tool.)*
+*(Note: the quick profile change via the four profile buttons only works when using the G13 GUI tool.)*
 
 ### Manually create your own Mapping Set
 
