@@ -6,6 +6,7 @@
 #include <memory>
 #include <map>
 #include <istream>
+#include <chrono>
 #include <libusb-1.0/libusb.h>
 #include <time.h> // For time_t
 
@@ -25,13 +26,14 @@ private:
     volatile int          keepGoing;     
 
     stick_mode_t          stick_mode;    
-    int                   stick_keys[4];   
-    int                   bindings;      
+    int                   stick_keys[4];  
+    int                   bindings;       // Active profile index (0..G13_NUM_PROFILES-1).
 
     unsigned char lcd_buffer[G13_LCD_BUFFER_SIZE];
 
     // Feature: Live-Reload
     time_t last_config_mtime;
+    std::chrono::steady_clock::time_point last_config_check;
     void check_for_config_update();
 
     // --- Private Methods ---
@@ -41,6 +43,11 @@ private:
     void parse_joystick(unsigned char *buf);
     void parse_key(int key, unsigned char *byte);
     void parse_keys(unsigned char *buf);
+
+    // Profile selection (bindings-<index>.properties)
+    void selectProfile(int profile);
+    int  loadStoredProfile();
+    void storeProfile(int profile);
 
     // FIFO / Pipe for external input
     int fifo_fd;             // File Descriptor for the pipe

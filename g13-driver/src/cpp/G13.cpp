@@ -40,9 +40,12 @@ std::string trim_string(const std::string& str) {
 G13::G13(libusb_device *device) {
     this->device = device;
     this->loaded = 0;
-    this->bindings = 0;
+    // Start on the profile that was last selected, so a driver restart does
+    // not silently fall back to bindings-0.
+    this->bindings = loadStoredProfile();
     this->stick_mode = STICK_KEYS;
     this->last_config_mtime = 0;
+    this->last_config_check = std::chrono::steady_clock::now();
 
     actions.resize(G13_NUM_KEYS);
     for (int i = 0; i < G13_NUM_KEYS; i++) {
@@ -108,6 +111,13 @@ void G13::stop() {
 
 // --- Live-Reload Implementation ---
 void G13::check_for_config_update() {
+    // The main loop spins at least once per USB read timeout (~100 ms), so
+    // checking the file's mtime on every pass is wasted work. Once a second
+    // is far more than enough for interactive config edits.
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_config_check < std::chrono::seconds(1)) return;
+    last_config_check = now;
+
     // NEW: Use ConfigPath helper
     std::string filename = ConfigPath::getBindingPath(bindings);
     
@@ -118,6 +128,42 @@ void G13::check_for_config_update() {
             loadBindings();
         }
     }
+}
+
+// --- Profile Selection ---
+// The active profile index is persisted so the driver comes back on the same
+// profile after a restart (and so it can be inspected or scripted).
+int G13::loadStoredProfile() {
+    std::ifstream file(ConfigPath::getActiveProfilePath());
+    int profile = -1;
+
+    if (file.is_open()) {
+        file >> profile;
+    }
+
+    if (profile < 0 || profile >= G13_NUM_PROFILES) {
+        return 0;
+    }
+    return profile;
+}
+
+void G13::storeProfile(int profile) {
+    const std::string filename = ConfigPath::getActiveProfilePath();
+    std::ofstream file(filename, std::ios::trunc);
+
+    if (!file.is_open()) {
+        syslog(LOG_WARNING, "Could not store active profile in %s", filename.c_str());
+        return;
+    }
+    file << profile << "\n";
+}
+
+void G13::selectProfile(int profile) {
+    if (profile < 0 || profile >= G13_NUM_PROFILES) return;
+
+    bindings = profile;
+    storeProfile(profile);
+    loadBindings();
 }
 
 std::unique_ptr<Macro> G13::loadMacro(int num) {
@@ -346,12 +392,31 @@ void G13::parse_key(int key, unsigned char *byte) {
     int pressed = actual_byte & mask;
 
     switch (key) {
-    case 25: case 26: case 27: case 28:
+    // Profile buttons: M1, M2, M3 and MR sit on report bits 29-32 and select
+    // bindings-0..3. Pressing the key also re-reads the file, so it doubles
+    // as a manual reload.
+    case G13_KEY_M1:
+    case G13_KEY_M2:
+    case G13_KEY_M3:
+    case G13_KEY_MR:
         if (pressed) {
-            bindings = key - 25; 
-            loadBindings();
+            selectProfile(key - G13_KEY_M1);
         }
         return;
+
+    // Legacy: before the M buttons were wired up, the four display buttons
+    // (L1-L4, bits 25-28) selected the same profiles. They keep working as
+    // aliases so existing setups do not regress.
+    case G13_KEY_L1:
+    case G13_KEY_L2:
+    case G13_KEY_L3:
+    case G13_KEY_L4:
+        if (pressed) {
+            selectProfile(key - G13_KEY_L1);
+        }
+        return;
+
+    // Stick directions are handled by parse_joystick().
     case 36: case 37: case 38: case 39:
         return;
     }

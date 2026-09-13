@@ -27,6 +27,12 @@ public:
     static std::string getMacroPath(int macroId);
 
     /**
+     * @brief Gets the full path to the file holding the active profile index.
+     * @return The absolute path string (e.g., "/home/user/.config/g13/active-profile").
+     */
+    static std::string getActiveProfilePath();
+
+    /**
      * @brief Gets the full path to the FIFO pipe.
      * @return The absolute path (e.g., "/run/user/1000/g13-lcd" or fallback to "/tmp/g13-lcd").
      */
