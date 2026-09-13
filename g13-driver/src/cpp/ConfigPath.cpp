@@ -74,3 +74,11 @@ std::string ConfigPath::getFifoPath() {
     // Fallback to tmp
     return "/tmp/g13-lcd";
 }
+
+std::string ConfigPath::getEventFifoPath() {
+    const char* xdgRuntime = getenv("XDG_RUNTIME_DIR");
+    if (xdgRuntime && *xdgRuntime) {
+        return std::string(xdgRuntime) + "/g13-events";
+    }
+    return "/tmp/g13-events";
+}

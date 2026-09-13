@@ -69,10 +69,21 @@ private:
     // FIFO / Pipe for external input
     int fifo_fd;             // File Descriptor for the pipe
     std::string fifo_path;   // Path to pipe (default: /tmp/g13-lcd)
-    
+
     void init_fifo();        // Create pipe
     void check_fifo();       // Read pipe data
     void cleanup_fifo();     // Remove pipe
+
+    // FIFO the config tool reads to implement record mode ("press MR, then the key
+    // to program"). One line per physical key change: "key <code> <0|1>".
+    int event_fifo_fd;
+    std::string event_fifo_path;
+    void init_event_fifo();
+    void cleanup_event_fifo();
+    void write_event(int key, int pressed);
+
+    // Physical state of every key, so only changes are reported.
+    std::vector<unsigned char> raw_keys;
 
 
 public:

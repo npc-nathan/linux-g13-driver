@@ -39,6 +39,13 @@ public:
     static std::string getFifoPath();
 
     /**
+     * @brief Gets the path of the FIFO the driver writes raw key presses to.
+     * The config tool reads it to implement record mode.
+     * @return Path to the events pipe (e.g. /run/user/1000/g13-events).
+     */
+    static std::string getEventFifoPath();
+
+    /**
      * @brief Ensures that the configuration directory exists.
      * Creates it if it is missing.
      */

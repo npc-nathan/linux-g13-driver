@@ -63,6 +63,8 @@ G13::G13(libusb_device *device) {
         actions[i] = std::make_unique<G13Action>();
     }
     explicit_bindings.assign(G13_NUM_KEYS, 0);
+    raw_keys.assign(G13_NUM_KEYS, 0);
+    event_fifo_fd = -1;
     mkey_binding.assign(G13_NUM_KEYS, -1);
     mbutton_down.assign(G13_NUM_KEYS, -1);
     for (int i = 0; i < G13_NUM_M_KEYS; i++) {
@@ -96,10 +98,12 @@ G13::G13(libusb_device *device) {
     this->loaded = 1;
 
     init_fifo();
+    init_event_fifo();
 }
 
 G13::~G13() {
     cleanup_fifo(); 
+    cleanup_event_fifo();
     if (!this->loaded) return;
     libusb_release_interface(this->handle, 0);
     libusb_close(this->handle);
@@ -464,6 +468,13 @@ void G13::parse_key(int key, unsigned char *byte) {
     unsigned char mask = 1 << (key % 8);
     int pressed = actual_byte & mask;
 
+    // Report physical changes to the config tool (record mode). Only changes, so
+    // the pipe stays quiet while a key is held.
+    if (raw_keys[key] != (unsigned char)(pressed ? 1 : 0)) {
+        raw_keys[key] = pressed ? 1 : 0;
+        write_event(key, pressed);
+    }
+
     switch (key) {
     // The four M buttons. M1, M2 and M3 select bindings-0..2 by default, and
     // pressing one also re-reads the file, so it doubles as a manual reload.
@@ -666,6 +677,71 @@ void G13::cleanup_fifo() {
         fifo_fd = -1;
     }
     unlink(fifo_path.c_str());
+}
+
+/**
+ * @brief Creates the FIFO the config tool reads raw key presses from.
+ *
+ * Opened read-write and non-blocking for the same reason as the LCD pipe: the
+ * driver must not block waiting for a reader, and must not die of SIGPIPE when
+ * nobody is listening.
+ */
+void G13::init_event_fifo() {
+    event_fifo_path = ConfigPath::getEventFifoPath();
+    event_fifo_fd = -1;
+
+    unlink(event_fifo_path.c_str());
+
+    if (mkfifo(event_fifo_path.c_str(), 0666) != 0) {
+        syslog(LOG_ERR, "Failed to create event FIFO at %s: %s", event_fifo_path.c_str(), strerror(errno));
+        return;
+    }
+
+    chmod(event_fifo_path.c_str(), 0666);
+    event_fifo_fd = ::open(event_fifo_path.c_str(), O_RDWR | O_NONBLOCK);
+
+    if (event_fifo_fd < 0) {
+        syslog(LOG_ERR, "Failed to open event FIFO: %s", strerror(errno));
+    } else {
+        syslog(LOG_INFO, "Event pipe created at %s", event_fifo_path.c_str());
+    }
+}
+
+void G13::cleanup_event_fifo() {
+    if (event_fifo_fd >= 0) {
+        ::close(event_fifo_fd);
+        event_fifo_fd = -1;
+    }
+    if (!event_fifo_path.empty()) {
+        unlink(event_fifo_path.c_str());
+    }
+}
+
+/**
+ * @brief Reports one physical key change to the event pipe.
+ *
+ * Nothing reads the pipe unless the config tool is recording, so the buffer fills
+ * up over time. When that happens the stale contents are dropped - they only ever
+ * describe presses that already happened - and the current event is written.
+ *
+ * @param key The G13 key code.
+ * @param pressed 1 for a press, 0 for a release.
+ */
+void G13::write_event(int key, int pressed) {
+    if (event_fifo_fd < 0) return;
+
+    char line[32];
+    int len = snprintf(line, sizeof(line), "key %d %d\n", key, pressed ? 1 : 0);
+    if (len <= 0) return;
+
+    ssize_t written = ::write(event_fifo_fd, line, len);
+    if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        char scratch[4096];
+        while (::read(event_fifo_fd, scratch, sizeof(scratch)) > 0) {
+            // Discard what nobody read.
+        }
+        ::write(event_fifo_fd, line, len);
+    }
 }
 
 void G13::check_fifo() {
