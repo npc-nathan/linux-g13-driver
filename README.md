@@ -114,9 +114,11 @@ profiles `bindings-0.properties` … `bindings-3.properties`. The four display
 buttons (L1-L4) still select the same profiles as aliases.
 
 Button types: a selected key can be **None**, **Pass Through**, **Macro** or
-**M Key** (one of the M button codes). The *M Buttons (this profile)* section
-chooses, per profile, whether each of M1-M4 switches profile or sends its own M
-code.
+**M Key event** (one of the M button codes). The *M Buttons (this profile)*
+section sets what each of M1-M4 does while this profile is active — switch
+profile (the default), pass through a key, play a macro, or send its M key
+event. Mapping all four to something else leaves you 26 keys but no
+profile switching from the pad; the GUI and `active-profile` still switch.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 

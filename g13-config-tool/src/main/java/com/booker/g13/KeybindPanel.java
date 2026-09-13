@@ -1,6 +1,7 @@
 package com.booker.g13;
 
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
@@ -36,7 +37,7 @@ public class KeybindPanel extends JPanel {
 	private final JRadioButton noneButton = new JRadioButton("None (sends nothing)");
 	private final JRadioButton passthroughButton = new JRadioButton("Pass Through");
 	private final JRadioButton macroButton = new JRadioButton("Macro");
-	private final JRadioButton mKeyButton = new JRadioButton("M Key");
+	private final JRadioButton mKeyButton = new JRadioButton("M Key event");
 	private final JTextField passthroughText = new JTextField();
 	private int passthroughCode = 0; // The Linux keycode for the passthrough key.
 	private final JComboBox<Properties> macroSelectionBox = new JComboBox<>();
@@ -44,10 +45,8 @@ public class KeybindPanel extends JPanel {
 	private final JComboBox<String> mKeySelectionBox = new JComboBox<>();
 
 	// --- UI Components for the M button overrides ---
-	/** One mode selector per M button: switch profile (default) or send its M code. */
-	private static final String MODE_SWITCH_PROFILE = "Switch profile";
-	private static final String MODE_SEND_CODE = "Send M code";
-	private final JComboBox<String> [] mKeyModeBoxes;
+	/** One row per M button: switch profile (default) or send something instead. */
+	private final MButtonRow [] mButtonRows = new MButtonRow[Key.PROFILE_KEY_COUNT];
 
 	// --- UI Components for Screen Color ---
 	private final JButton colorChangeButton = new JButton("Click Here To Change");
@@ -64,14 +63,192 @@ public class KeybindPanel extends JPanel {
 	private volatile boolean loadingData = false;
 
 	/**
+	 * One row of the "M Buttons" section: what this M button does while the current
+	 * profile is active, plus the detail widget for the chosen behaviour.
+	 */
+	private final class MButtonRow {
+
+		/** Mode indices, in combo box order. */
+		static final int MODE_SWITCH_PROFILE = 0;
+		static final int MODE_PASS_THROUGH = 1;
+		static final int MODE_MACRO = 2;
+		static final int MODE_M_CODE = 3;
+
+		private static final String CARD_EMPTY = "empty";
+		private static final String CARD_KEY = "key";
+		private static final String CARD_MACRO = "macro";
+		private static final String CARD_CODE = "code";
+
+		private final int index;
+		private final JComboBox<String> modeBox = new JComboBox<>(new String[] {
+				"Switch profile", "Pass through a key", "Play macro", "Send M key event" });
+		private final JTextField keyField = new JTextField();
+		private final JComboBox<Properties> macroBox = new JComboBox<>();
+		private final JComboBox<String> codeBox = new JComboBox<>();
+		private final JPanel detail = new JPanel(new CardLayout());
+		private int capturedKeyCode = 0;
+
+		MButtonRow(final int index) {
+			this.index = index;
+
+			keyField.setFocusTraversalKeysEnabled(false);
+			keyField.setToolTipText("Click here and press the key M" + (index + 1) + " should send");
+			for (int i = 0; i < Key.PROFILE_KEY_COUNT; i++) {
+				codeBox.addItem(JavaToLinuxKeymapping.mKeyName(i));
+			}
+			macroBox.setRenderer(new MacroListCellRenderer());
+
+			detail.add(new JLabel(" "), CARD_EMPTY);
+			detail.add(keyField, CARD_KEY);
+			detail.add(macroBox, CARD_MACRO);
+			detail.add(codeBox, CARD_CODE);
+
+			modeBox.addActionListener(e -> {
+				showDetailCard();
+				save();
+			});
+			keyField.addKeyListener(new KeyAdapter() {
+				@Override
+				public void keyReleased(KeyEvent event) {
+					if (loadingData) return;
+					loadingData = true;
+					capturedKeyCode = JavaToLinuxKeymapping.keyEventToCCode(event);
+					keyField.setText(JavaToLinuxKeymapping.cKeyCodeToString(capturedKeyCode));
+					loadingData = false;
+					save();
+				}
+			});
+			macroBox.addActionListener(e -> save());
+			codeBox.addActionListener(e -> save());
+		}
+
+		private void showDetailCard() {
+			final CardLayout layout = (CardLayout) detail.getLayout();
+			layout.show(detail, switch (modeBox.getSelectedIndex()) {
+				case MODE_PASS_THROUGH -> CARD_KEY;
+				case MODE_MACRO -> CARD_MACRO;
+				case MODE_M_CODE -> CARD_CODE;
+				default -> CARD_EMPTY;
+			});
+		}
+
+		/** @return The properties key this button writes to, e.g. "G29". */
+		private String property() {
+			return "G" + (Key.PROFILE_KEY_M1 + index);
+		}
+
+		/**
+		 * Writes the selected behaviour for this M button into the current profile.
+		 * Switching profile is the default, so it stores nothing at all.
+		 */
+		private void save() {
+			if (bindings == null || loadingData) {
+				return;
+			}
+
+			switch (modeBox.getSelectedIndex()) {
+				case MODE_PASS_THROUGH:
+					if (capturedKeyCode > 0) {
+						bindings.put(property(), "p,k." + capturedKeyCode);
+					} else {
+						bindings.remove(property());
+					}
+					break;
+				case MODE_MACRO: {
+					final int macroNum = macroBox.getSelectedIndex();
+					if (macroNum >= 0) {
+						bindings.put(property(), "m," + macroNum + ",0");
+					} else {
+						bindings.remove(property());
+					}
+					break;
+				}
+				case MODE_M_CODE:
+					bindings.put(property(), "mk," + codeBox.getSelectedIndex());
+					break;
+				default:
+					bindings.remove(property());
+					break;
+			}
+
+			saveProfile();
+		}
+
+		/**
+		 * Fills the row from a binding value of the loaded profile.
+		 * @param value The value, or null when the button switches profile.
+		 */
+		private void load(final String value) {
+			loadingData = true;
+
+			capturedKeyCode = 0;
+			keyField.setText("");
+
+			if (value == null || value.isBlank()) {
+				modeBox.setSelectedIndex(MODE_SWITCH_PROFILE);
+			} else {
+				final String[] parts = value.split("[,.]");
+				try {
+					switch (parts[0]) {
+						case "p":
+							modeBox.setSelectedIndex(MODE_PASS_THROUGH);
+							capturedKeyCode = parts.length >= 3 ? Integer.parseInt(parts[2]) : 0;
+							keyField.setText(JavaToLinuxKeymapping.cKeyCodeToString(capturedKeyCode));
+							break;
+						case "m":
+							modeBox.setSelectedIndex(MODE_MACRO);
+							macroBox.setSelectedIndex(parts.length >= 2 ? Integer.parseInt(parts[1]) : 0);
+							break;
+						case "mk":
+							modeBox.setSelectedIndex(MODE_M_CODE);
+							codeBox.setSelectedIndex(parts.length >= 2 ? Integer.parseInt(parts[1]) : 0);
+							break;
+						default:
+							modeBox.setSelectedIndex(MODE_SWITCH_PROFILE);
+							break;
+					}
+				} catch (NumberFormatException e) {
+					modeBox.setSelectedIndex(MODE_SWITCH_PROFILE);
+				}
+			}
+
+			showDetailCard();
+			loadingData = false;
+		}
+
+		/**
+		 * Replaces the macro list offered by this row's macro mode, keeping the
+		 * current selection if it still exists.
+		 * @param availableMacros All macros, or null.
+		 */
+		private void setMacroList(final Properties[] availableMacros) {
+			loadingData = true;
+			final int selected = macroBox.getSelectedIndex();
+
+			macroBox.removeAllItems();
+			if (availableMacros != null) {
+				for (final Properties p : availableMacros) {
+					macroBox.addItem(p);
+				}
+			}
+
+			if (macroBox.getItemCount() > 0) {
+				macroBox.setSelectedIndex(selected >= 0 && selected < macroBox.getItemCount() ? selected : 0);
+			}
+			loadingData = false;
+		}
+	}
+
+	/**
 	 * Constructs the KeybindPanel, setting up its UI and event listeners.
 	 */
-	@SuppressWarnings("unchecked")
 	public KeybindPanel() {
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createTitledBorder("Keybindings Panel"));
 
-		mKeyModeBoxes = new JComboBox[Key.PROFILE_KEY_COUNT];
+		for (int i = 0; i < mButtonRows.length; i++) {
+			mButtonRows[i] = new MButtonRow(i);
+		}
 
 		setupUI();
         attachListeners();
@@ -122,21 +299,20 @@ public class KeybindPanel extends JPanel {
 
 	/**
 	 * Builds the M button section: per profile, each of M1-M4 either switches to its
-	 * binding profile (the default) or sends its own M key code.
+	 * binding profile (the default) or sends something else instead. Mapping all four
+	 * to keys gives four extra keys but nothing on the device switches profiles; the
+	 * GUI and the active-profile file still can.
 	 * @return The configured panel.
 	 */
 	private JPanel createMButtonPanel() {
 		final JPanel panel = new JPanel(new GridLayout(0, 2, 5, 5));
 		panel.setBorder(BorderFactory.createTitledBorder("M Buttons (this profile)"));
 
-		for (int i = 0; i < Key.PROFILE_KEY_COUNT; i++) {
-			final JComboBox<String> modes = new JComboBox<>(new String[] { MODE_SWITCH_PROFILE, MODE_SEND_CODE });
-			final int index = i;
-			modes.addActionListener(e -> saveMButtonOverride(index));
-			mKeyModeBoxes[i] = modes;
-
-			panel.add(new JLabel(JavaToLinuxKeymapping.mKeyShortName(i)));
-			panel.add(modes);
+		for (final MButtonRow row : mButtonRows) {
+			panel.add(new JLabel(JavaToLinuxKeymapping.mKeyShortName(row.index)));
+			panel.add(row.modeBox);
+			panel.add(new JLabel(" ")); // Spacer under the button name
+			panel.add(row.detail);
 		}
 		return panel;
 	}
@@ -214,6 +390,12 @@ public class KeybindPanel extends JPanel {
 		}
 
 		loadingData = false;
+
+		// The M button rows are profile settings, so they are usable whether or not a
+		// key is selected.
+		for (final MButtonRow row : mButtonRows) {
+			row.setMacroList(macros);
+		}
 	}
 
 	/**
@@ -242,19 +424,18 @@ public class KeybindPanel extends JPanel {
 			colorChangeButton.setBackground(Color.WHITE); // Fallback to white.
 		}
 
-		refreshMButtonOverrides();
-
-		setSelectedKey(null); // Reset selection when bindings change.
 		loadingData = false;
+
+		refreshMButtonOverrides();
+		setSelectedKey(null); // Reset selection when bindings change.
 	}
 
 	/**
-	 * Updates the M button mode selectors to match the profile that is loaded.
+	 * Updates the M button rows to match the profile that is loaded.
 	 */
 	private void refreshMButtonOverrides() {
-		for (int i = 0; i < mKeyModeBoxes.length; i++) {
-			final String value = bindings == null ? null : bindings.getProperty(mButtonProperty(i));
-			mKeyModeBoxes[i].setSelectedIndex(isMKeyCode(value) ? 1 : 0);
+		for (final MButtonRow row : mButtonRows) {
+			row.load(bindings == null ? null : bindings.getProperty(row.property()));
 		}
 	}
 
@@ -353,44 +534,6 @@ public class KeybindPanel extends JPanel {
 		p.add(colorChangeButton);
 		colorChangeButton.addActionListener(e -> changeScreenColor());
 		return p;
-	}
-
-	/**
-	 * The properties key that overrides one of the M buttons.
-	 * @param index The M button index (0 = M1, 1 = M2, 2 = M3, 3 = MR).
-	 * @return The key, e.g. "G29".
-	 */
-	private static String mButtonProperty(final int index) {
-		return "G" + (Key.PROFILE_KEY_M1 + index);
-	}
-
-	/**
-	 * @param value A binding value.
-	 * @return true if the value is an M key code binding ("mk,&lt;index&gt;").
-	 */
-	private static boolean isMKeyCode(final String value) {
-		return value != null && value.startsWith("mk,");
-	}
-
-	/**
-	 * Stores the M button overrides of the current profile. A button set to send its
-	 * M code is bound as "mk,&lt;index&gt;"; a button that switches profile is left
-	 * unassigned so the driver's default applies.
-	 * @param index The M button index.
-	 */
-	private void saveMButtonOverride(final int index) {
-		if (bindings == null || loadingData) {
-			return;
-		}
-
-		final String prop = mButtonProperty(index);
-		if (mKeyModeBoxes[index].getSelectedIndex() == 1) {
-			bindings.put(prop, "mk," + index);
-		} else {
-			bindings.remove(prop);
-		}
-
-		saveProfile();
 	}
 
 	/**
