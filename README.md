@@ -109,19 +109,20 @@ g13-gui
 
 This will bring up the UI.
 
-Profiles: pick one with the **Profile** selector at the top of the panel (M1, M2,
-M3, MR). That loads `bindings-N.properties` for editing *and* activates it on the
+Profiles: pick one with the **Profile** selector at the top of the panel (**M1, M2,
+M3**). That loads `bindings-N.properties` for editing *and* activates it on the
 device — the selector writes the same `~/.config/g13/active-profile` file the driver
-watches, so the pad switches over within a second. Pressing the M buttons on the
-pad selects them for editing like any other key; the driver's own default of
-switching profile still applies unless the profile binds them.
+watches, so the pad switches over within a second. **MR is not a profile**: it is the
+macro record button and sends `KEY_MACRO_RECORD_START`, unless the profile binds it.
+Pressing any of the M buttons on the pad selects it for editing like any other key.
 
 Button types: a selected key can be **None**, **Pass Through**, **Macro** or
-**M Key event** (one of the M button codes). For the M buttons there is an extra
-option, **Switch profile (default)** — that is the driver's normal behaviour and it
-is what you get when the profile contains no entry for that button. Choosing
-*None* for an M button stores `G29=x`, an explicit "do nothing", because simply
-removing the entry would make it switch profile again.
+**M Key event** (one of the M button codes). For the M buttons there is one extra
+option, labelled for the button: **Switch profile (default)** on M1-M3 and
+**Macro record (default)** on MR. Those are the driver's own defaults, and they are
+what you get when the profile contains no entry for that button. Choosing *None* for
+an M button stores `x`, an explicit "do nothing", because simply removing the entry
+would fall back to the default behaviour.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
@@ -160,7 +161,7 @@ If you don't want to use the GUI App, you can edit the files manually in `~/.con
 | `p,k.<code>` | Pass through a single key. `<code>` is the Linux event code (see `docs/Eventcodes_for_Mapping.pdf`). |
 | `m,<macroId>,<repeats>` | Play macro `<macroId>` from `~/.config/g13/macro-<macroId>.properties`; `<repeats>` is `0` or `1`. |
 | `mk,<index>` | Send the M key code for `<index>`: `0`=M1 (`KEY_MACRO_PRESET1`), `1`=M2, `2`=M3, `3`=MR (`KEY_MACRO_RECORD_START`). |
-| `x` | Do nothing at all. Only meaningful for the M buttons, whose default (no entry) is to switch profile. |
+| `x` | Do nothing at all. Only meaningful for the M buttons, whose default (no entry) is to switch profile (M1-M3) or send the macro record event (MR). |
 
 A key with no entry at all sends nothing. Removing a line takes effect within a
 second if that profile is the active one.

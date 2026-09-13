@@ -281,18 +281,30 @@ public class ImageMap extends JLabel {
      */
     private void drawTooltip(Graphics2D g, Key key) {
         String[][] lines;
-        // Profile buttons show what they do in the profile being edited.
-        if (Key.isProfileKey(key.getG13KeyCode())) {
+        // The M buttons show what they do in the profile being edited.
+        if (Key.isMKey(key.getG13KeyCode())) {
             final String mapped = key.getMappedValue();
             final boolean disabled = "Disabled".equals(mapped);
             final boolean bound = mapped != null && !mapped.isBlank()
                     && !disabled && !"Unassigned".equals(mapped) && !"Unknown".equals(mapped);
+            final boolean profileButton = Key.isProfileButton(key.getG13KeyCode());
             lines = new String[][]{
                 {"G13 Key", Key.profileKeyName(key.getG13KeyCode())},
-                {"Configuration", "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"},
+                {"Configuration", profileButton
+                        ? "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"
+                        : "macro record (KEY_MACRO_RECORD_START)"},
                 {disabled ? "Disabled in this profile"
                         : (bound ? "Sends: " + mapped
-                                : "Switches to this profile (default)"), ""},
+                                : (profileButton ? "Switches to this profile (default)"
+                                        : "Sends the macro record event (default)")), ""},
+            };
+        } else if (Key.isLegacyProfileKey(key.getG13KeyCode())) {
+            lines = new String[][]{
+                {"G13 Key", Key.profileKeyName(key.getG13KeyCode())},
+                {"Display button", key.getG13KeyCode() == Key.PROFILE_KEY_LEGACY_L1 + Key.M_KEY_COUNT - 1
+                        ? "Unused"
+                        : "Legacy profile selector"},
+                {"", ""},
             };
         } else {
             lines = new String[][]{

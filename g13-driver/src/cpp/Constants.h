@@ -11,7 +11,8 @@
 #define G13_REPORT_SIZE 8       // Size of the input report from the G13 (in bytes).
 #define G13_LCD_BUFFER_SIZE 0x3c0 // Size of the buffer for the LCD screen.
 #define G13_NUM_KEYS 40         // Total number of logical keys, including stick directions.
-#define G13_NUM_PROFILES 4      // Number of binding profiles: M1, M2, M3 and MR.
+#define G13_NUM_PROFILES 3      // Binding profiles: M1, M2, M3. (MR is the record button.)
+#define G13_NUM_M_KEYS 4        // The four M buttons: M1, M2, M3, MR.
 
 // Linux event codes sent by the "M key" binding type (mk,<index>) and by profile
 // buttons that the active profile overrides. These are the codes the mainline
@@ -81,14 +82,13 @@ enum G13_KEYS {
     G13_KEY_L1,            // The L1 display button (legacy profile 0 selector).
     G13_KEY_L2,            // The L2 display button (legacy profile 1 selector).
     G13_KEY_L3,            // The L3 display button (legacy profile 2 selector).
-
-    G13_KEY_L4,            // The L4 display button (legacy profile 3 selector).
+    G13_KEY_L4,            // The L4 display button (legacy profile selector, now unused).
     G13_KEY_M1,            // The M1 profile button (selects bindings-0).
     G13_KEY_M2,            // The M2 profile button (selects bindings-1).
     G13_KEY_M3,            // The M3 profile button (selects bindings-2).
 
     /* byte 7 of the report */
-    G13_KEY_MR,            // The "Macro Record" (MR) button (selects bindings-3).
+    G13_KEY_MR,            // The "Macro Record" (MR) button: sends KEY_MACRO_RECORD_START.
     G13_KEY_LEFT,          // Left thumb button.
     G13_KEY_DOWN,          // Down thumb button.
     G13_KEY_TOP,           // Top thumb button (joystick press).

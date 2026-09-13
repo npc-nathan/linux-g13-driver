@@ -47,7 +47,7 @@ public class G13 extends JPanel {
 	private int currentProfile = 0;
 	/** One toggle per profile: loads it here and activates it on the device. */
 	private final JPanel profilePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-	private final JToggleButton[] profileButtons = new JToggleButton[4];
+	private final JToggleButton[] profileButtons = new JToggleButton[Key.PROFILE_COUNT];
 	
 	/**
 	 * Constructor for the main G13 panel.

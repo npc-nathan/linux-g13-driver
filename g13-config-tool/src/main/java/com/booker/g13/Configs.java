@@ -71,7 +71,7 @@ public class Configs {
                 return 0;
             }
             int profile = Integer.parseInt(Files.readString(file).trim());
-            return (profile >= 0 && profile < 4) ? profile : 0;
+            return (profile >= 0 && profile < Key.PROFILE_COUNT) ? profile : 0;
         } catch (IOException | NumberFormatException e) {
             System.err.println("Could not read " + file + ": " + e.getMessage());
             return 0;

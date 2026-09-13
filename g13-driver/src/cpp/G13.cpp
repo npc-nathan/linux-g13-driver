@@ -104,6 +104,9 @@ void G13::start() {
     if (!this->loaded) return;
     draw_test_pattern();
     loadBindings();
+    // Normalise the stored profile if it held a value that no longer exists (for
+    // example the old MR slot 3), so the file always matches reality.
+    storeProfile(bindings);
     keepGoing = 1;
 
     while (keepGoing && daemon_keep_running) {
@@ -263,7 +266,7 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
                     std::string index_str;
                     if (!std::getline(ss, index_str, ',')) continue;
                     int index = std::stoi(trim_string(index_str));
-                    if (index >= 0 && index < G13_NUM_PROFILES && gKey >= 0 && gKey < G13_NUM_KEYS) {
+                    if (index >= 0 && index < G13_NUM_M_KEYS && gKey >= 0 && gKey < G13_NUM_KEYS) {
                         actions[gKey] = std::make_unique<PassThroughAction>(mkeyCodeFor(index));
                         explicit_bindings[gKey] = 1;
                     }
@@ -307,6 +310,10 @@ void G13::resetActions() {
         actions[i] = std::make_unique<G13Action>();
         explicit_bindings[i] = 0;
     }
+
+    // MR is the macro record button, so unless the profile binds it, it sends the
+    // same event the kernel sends for that button.
+    actions[G13_KEY_MR] = std::make_unique<PassThroughAction>(G13_KEYCODE_MACRO_RECORD_START);
 }
 
 void G13::loadBindings() {
@@ -451,32 +458,36 @@ void G13::parse_key(int key, unsigned char *byte) {
     int pressed = actual_byte & mask;
 
     switch (key) {
-    // Profile buttons: M1, M2, M3 and MR sit on report bits 29-32 and select
-    // bindings-0..3. Pressing the key also re-reads the file, so it doubles
-    // as a manual reload. A profile that binds the button itself (the "mk"
-    // binding type) overrides the switch and sends that binding instead.
+    // Profile buttons: M1, M2 and M3 sit on report bits 29-31 and select
+    // bindings-0..2. Pressing the key also re-reads the file, so it doubles as a
+    // manual reload. A profile that binds the button itself overrides the switch
+    // and sends that binding instead.
     case G13_KEY_M1:
     case G13_KEY_M2:
     case G13_KEY_M3:
-    case G13_KEY_MR:
         if (!explicit_bindings[key] && pressed) {
             selectProfile(key - G13_KEY_M1);
             return;
         }
         break;
 
-    // Legacy: before the M buttons were wired up, the four display buttons
-    // (L1-L4, bits 25-28) selected the same profiles. They keep working as
-    // aliases so existing setups do not regress.
+    // MR is not a profile button: it is the macro record trigger and is handled by
+    // its default action (KEY_MACRO_RECORD_START) unless the profile binds it.
+
+    // Legacy: before the M buttons were wired up, the display buttons (L1-L4,
+    // bits 25-28) selected the profiles. L1-L3 keep working as aliases so existing
+    // setups do not regress; L4 has no profile to select any more.
     case G13_KEY_L1:
     case G13_KEY_L2:
     case G13_KEY_L3:
-    case G13_KEY_L4:
         if (!explicit_bindings[key] && pressed) {
             selectProfile(key - G13_KEY_L1);
             return;
         }
         break;
+
+    case G13_KEY_L4:
+        return;
 
     // Stick directions are handled by parse_joystick().
     case 36: case 37: case 38: case 39:

@@ -103,61 +103,73 @@ public class Key {
 	// --- Profile (binding set) buttons ---
 
 	/**
-	 * G13 keycode of the M1 button. The four profile buttons are M1, M2, M3
-	 * and MR, sitting on keycodes 29-32; they select bindings-0.properties to
-	 * bindings-3.properties, in that order.
+	 * G13 keycode of the M1 button. The M buttons are M1, M2, M3 and MR on keycodes
+	 * 29-32. M1, M2 and M3 select the binding profiles 0-2; MR is the macro record
+	 * button, not a profile.
 	 */
-	public static final int PROFILE_KEY_M1 = 29;
+	public static final int M_KEY_M1 = 29;
 
-	/** Number of profile buttons (M1, M2, M3, MR). */
-	public static final int PROFILE_KEY_COUNT = 4;
+	/** Number of M buttons: M1, M2, M3 and MR. */
+	public static final int M_KEY_COUNT = 4;
+
+	/** Number of binding profiles, selected by M1, M2 and M3. */
+	public static final int PROFILE_COUNT = 3;
 
 	/**
-	 * Legacy profile buttons: before the M buttons were wired up, the four
-	 * display buttons (L1-L4, keycodes 25-28) selected the same four profiles.
-	 * The driver still accepts them as aliases.
+	 * Legacy profile buttons: the four display buttons (L1-L4, keycodes 25-28) used
+	 * to select profiles before the M buttons were wired up. The driver still accepts
+	 * L1-L3 as aliases.
 	 */
 	public static final int PROFILE_KEY_LEGACY_L1 = 25;
 
 	/**
 	 * @param g13KeyCode The keycode to test.
-	 * @return true if this key selects a binding profile instead of mapping a key.
+	 * @return true if this is one of the four M buttons.
 	 */
-	public static boolean isProfileKey(int g13KeyCode) {
-		return (g13KeyCode >= PROFILE_KEY_M1 && g13KeyCode < PROFILE_KEY_M1 + PROFILE_KEY_COUNT)
-				|| (g13KeyCode >= PROFILE_KEY_LEGACY_L1
-						&& g13KeyCode < PROFILE_KEY_LEGACY_L1 + PROFILE_KEY_COUNT);
+	public static boolean isMKey(int g13KeyCode) {
+		return g13KeyCode >= M_KEY_M1 && g13KeyCode < M_KEY_M1 + M_KEY_COUNT;
+	}
+
+	/**
+	 * @param g13KeyCode The keycode to test.
+	 * @return true if this button selects a binding profile (M1, M2, M3).
+	 */
+	public static boolean isProfileButton(int g13KeyCode) {
+		return g13KeyCode >= M_KEY_M1 && g13KeyCode < M_KEY_M1 + PROFILE_COUNT;
+	}
+
+	/**
+	 * @param g13KeyCode The keycode to test.
+	 * @return true if this is one of the legacy display buttons (L1-L4).
+	 */
+	public static boolean isLegacyProfileKey(int g13KeyCode) {
+		return g13KeyCode >= PROFILE_KEY_LEGACY_L1
+				&& g13KeyCode < PROFILE_KEY_LEGACY_L1 + M_KEY_COUNT;
 	}
 
 	/**
 	 * @param g13KeyCode The keycode of a profile button.
-	 * @return The profile index (0-3) that this button selects, or -1 if the
-	 *         keycode is not a profile button.
+	 * @return The profile index (0-2) that this button selects, or -1 if the keycode
+	 *         is not a profile button.
 	 */
 	public static int profileIndexFor(int g13KeyCode) {
-		if (!isProfileKey(g13KeyCode)) {
-			return -1;
-		}
-		return g13KeyCode >= PROFILE_KEY_M1
-				? g13KeyCode - PROFILE_KEY_M1
-				: g13KeyCode - PROFILE_KEY_LEGACY_L1;
+		return isProfileButton(g13KeyCode) ? g13KeyCode - M_KEY_M1 : -1;
 	}
 
 	/**
-	 * @param g13KeyCode The keycode of a profile button.
+	 * @param g13KeyCode The keycode of an M or display button.
 	 * @return The label printed on the device, e.g. "M2" or "MR".
 	 */
 	public static String profileKeyName(int g13KeyCode) {
-		if (g13KeyCode >= PROFILE_KEY_M1 && g13KeyCode < PROFILE_KEY_M1 + PROFILE_KEY_COUNT) {
-			return switch (g13KeyCode - PROFILE_KEY_M1) {
+		if (isMKey(g13KeyCode)) {
+			return switch (g13KeyCode - M_KEY_M1) {
 				case 0 -> "M1";
 				case 1 -> "M2";
 				case 2 -> "M3";
 				default -> "MR";
 			};
 		}
-		if (g13KeyCode >= PROFILE_KEY_LEGACY_L1
-				&& g13KeyCode < PROFILE_KEY_LEGACY_L1 + PROFILE_KEY_COUNT) {
+		if (isLegacyProfileKey(g13KeyCode)) {
 			return "L" + (g13KeyCode - PROFILE_KEY_LEGACY_L1 + 1);
 		}
 		return "G" + g13KeyCode;
