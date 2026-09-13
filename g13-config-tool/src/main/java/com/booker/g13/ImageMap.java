@@ -281,17 +281,18 @@ public class ImageMap extends JLabel {
      */
     private void drawTooltip(Graphics2D g, Key key) {
         String[][] lines;
-        // Display different information for profile buttons vs. regular keys.
+        // Profile buttons show what they do in the profile being edited.
         if (Key.isProfileKey(key.getG13KeyCode())) {
             final String mapped = key.getMappedValue();
-            final boolean overridden = mapped != null && !mapped.isBlank()
-                    && !"Unassigned".equals(mapped) && !"Unknown".equals(mapped);
+            final boolean disabled = "Disabled".equals(mapped);
+            final boolean bound = mapped != null && !mapped.isBlank()
+                    && !disabled && !"Unassigned".equals(mapped) && !"Unknown".equals(mapped);
             lines = new String[][]{
                 {"G13 Key", Key.profileKeyName(key.getG13KeyCode())},
                 {"Configuration", "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"},
-                {overridden
-                        ? "Override: sends " + mapped
-                        : "This button is reserved to load bindings", ""},
+                {disabled ? "Disabled in this profile"
+                        : (bound ? "Sends: " + mapped
+                                : "Switches to this profile (default)"), ""},
             };
         } else {
             lines = new String[][]{

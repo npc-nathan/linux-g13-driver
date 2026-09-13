@@ -140,6 +140,14 @@ void G13::check_for_config_update() {
             loadBindings();
         }
     }
+
+    // The active profile can be changed from outside (the GUI writes the index,
+    // scripts can too), so follow it here rather than only at startup.
+    const int storedProfile = loadStoredProfile();
+    if (storedProfile != bindings) {
+        syslog(LOG_INFO, "Active profile changed to %d. Switching...", storedProfile);
+        selectProfile(storedProfile);
+    }
 }
 
 // --- Profile Selection ---
@@ -257,6 +265,13 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
                     int index = std::stoi(trim_string(index_str));
                     if (index >= 0 && index < G13_NUM_PROFILES && gKey >= 0 && gKey < G13_NUM_KEYS) {
                         actions[gKey] = std::make_unique<PassThroughAction>(mkeyCodeFor(index));
+                        explicit_bindings[gKey] = 1;
+                    }
+                }
+                else if (type == "x") {
+                    // Explicitly nothing: used for a profile button that should do
+                    // nothing at all instead of switching profile.
+                    if (gKey >= 0 && gKey < G13_NUM_KEYS) {
                         explicit_bindings[gKey] = 1;
                     }
                 }

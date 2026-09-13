@@ -1,13 +1,16 @@
 package com.booker.g13;
 
 import java.awt.BorderLayout;
+import java.awt.FlowLayout;
 import java.io.IOException;
 import java.util.Properties;
 
 import javax.swing.BorderFactory;
+import javax.swing.ButtonGroup;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
@@ -42,6 +45,9 @@ public class G13 extends JPanel {
 	private final Properties[] macros = new Properties[MAX_MACROS]; // Holds all configured macros.
 	/** The profile currently shown on the keypad, for refreshing labels after edits. */
 	private int currentProfile = 0;
+	/** One toggle per profile: loads it here and activates it on the device. */
+	private final JPanel profilePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+	private final JToggleButton[] profileButtons = new JToggleButton[4];
 	
 	/**
 	 * Constructor for the main G13 panel.
@@ -53,24 +59,12 @@ public class G13 extends JPanel {
 		// Load all configurations and initialize the UI.
 		loadConfiguration();
 		
-		// Set the initial bindings to the first profile (M1).
-		keybindPanel.setBindings(0, keyBindings[0]);
-		
 		g13Label.addListener(new ImageMapListener() {
 			@Override
 			public void selected(Key key) {
-				if (key == null) {
-					keybindPanel.setSelectedKey(null);
-					return;
-				}
-				
-				// Profile buttons (M1, M2, M3, MR) switch the active binding set.
-				if (Key.isProfileKey(key.getG13KeyCode())) {
-					mapBindings(Key.profileIndexFor(key.getG13KeyCode()));
-				} else {
-					// A regular key was selected, pass it to the keybind panel for editing.
-					keybindPanel.setSelectedKey(key);
-				}
+				// Every key is selected for editing here, the M buttons included; the
+				// Profile selector is what changes which profile is loaded and active.
+				keybindPanel.setSelectedKey(key);
 			}
 
 			@Override
@@ -86,7 +80,10 @@ public class G13 extends JPanel {
 		add(p, BorderLayout.CENTER);
 		
 		final JPanel rightPanel = new JPanel(new BorderLayout());
-		rightPanel.add(keybindPanel, BorderLayout.NORTH);
+		final JPanel topPanel = new JPanel(new BorderLayout());
+		topPanel.add(createProfilePanel(), BorderLayout.NORTH);
+		topPanel.add(keybindPanel, BorderLayout.CENTER);
+		rightPanel.add(topPanel, BorderLayout.NORTH);
 		rightPanel.add(macroEditorPanel, BorderLayout.CENTER);
 		add(rightPanel, BorderLayout.EAST);
 		
@@ -96,6 +93,60 @@ public class G13 extends JPanel {
 
 		// Keep the keypad's key tooltips in step with edits made in the panel.
 		keybindPanel.setBindingChangeListener(() -> refreshKeyLabels(currentProfile));
+
+		// Open on the profile the driver is actually using.
+		showProfile(Configs.loadActiveProfile());
+	}
+
+	/**
+	 * Builds the profile selector: the single control that loads one of the four
+	 * binding profiles and makes the device switch to it.
+	 * @return The configured panel.
+	 */
+	private JPanel createProfilePanel() {
+		profilePanel.setBorder(BorderFactory.createTitledBorder("Profile"));
+		final ButtonGroup group = new ButtonGroup();
+
+		for (int i = 0; i < profileButtons.length; i++) {
+			final int profile = i;
+			final JToggleButton button = new JToggleButton(JavaToLinuxKeymapping.mKeyShortName(i));
+			button.setToolTipText("Load bindings-" + i + ".properties and activate it on the device");
+			button.addActionListener(e -> activateProfile(profile));
+
+			group.add(button);
+			profileButtons[i] = button;
+			profilePanel.add(button);
+		}
+		return profilePanel;
+	}
+
+	/**
+	 * Shows a profile on the keypad without touching the device.
+	 * @param profile The profile index (0-3).
+	 */
+	private void showProfile(int profile) {
+		if (profile < 0 || profile >= keyBindings.length) {
+			return;
+		}
+
+		mapBindings(profile);
+		profileButtons[profile].setSelected(true);
+	}
+
+	/**
+	 * Loads a profile for editing and makes the driver switch to it, by writing the
+	 * same file the driver reads when a profile button is pressed.
+	 * @param profile The profile index (0-3).
+	 */
+	private void activateProfile(int profile) {
+		showProfile(profile);
+
+		try {
+			Configs.saveActiveProfile(profile);
+		} catch (IOException e) {
+			JOptionPane.showMessageDialog(this, "Could not activate the profile: " + e.getMessage(),
+					"Error", JOptionPane.ERROR_MESSAGE);
+		}
 	}
 
 	/**
@@ -185,6 +236,8 @@ public class G13 extends JPanel {
 					} else if ("mk".equals(type)) { // M key code
 						int mKeyIndex = Integer.parseInt(parts[1]);
 						k.setMappedValue("M Key: " + JavaToLinuxKeymapping.mKeyShortName(mKeyIndex));
+					} else if ("x".equals(type)) { // Explicitly nothing
+						k.setMappedValue("Disabled");
 					}
 				} catch (NumberFormatException e) {
 					// Handle cases where the number in the property is malformed.

@@ -59,6 +59,36 @@ public class Configs {
         return baseDir.resolve("g13");
     }
 
+    /**
+     * Reads the profile the driver is currently using. The file holds a single
+     * integer (0-3) and is written by the driver when a profile button is pressed.
+     * @return The active profile index, or 0 if it is missing or unreadable.
+     */
+    public static int loadActiveProfile() {
+        Path file = getConfigDir().resolve("active-profile");
+        try {
+            if (Files.notExists(file)) {
+                return 0;
+            }
+            int profile = Integer.parseInt(Files.readString(file).trim());
+            return (profile >= 0 && profile < 4) ? profile : 0;
+        } catch (IOException | NumberFormatException e) {
+            System.err.println("Could not read " + file + ": " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Makes a profile the active one. The driver notices within a second and
+     * switches to it, so this is how the GUI activates a profile on the device.
+     * @param profile The profile index (0-3).
+     */
+    public static void saveActiveProfile(int profile) throws IOException {
+        Path file = getConfigDir().resolve("active-profile");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, profile + "\n");
+    }
+
 	public static Properties loadBindings(int item) throws IOException {
 		Path file = getConfigDir().resolve("bindings-" + item + ".properties");
 
