@@ -63,6 +63,15 @@ public class G13 extends JPanel {
 	/** How long to wait before re-reading the active profile, in milliseconds. */
 	private static final int PROFILE_POLL_MS = 1000;
 
+	/** How often to remind the driver that we are still recording, in milliseconds. */
+	private static final int RECORD_HEARTBEAT_MS = 2000;
+
+	/** Sends commands to the driver (bindings off while recording). */
+	private final Control control = new Control();
+
+	/** Keeps the driver's record state alive while this window is recording. */
+	private final Timer recordHeartbeat = new Timer(RECORD_HEARTBEAT_MS, e -> control.send(Control.RECORD_ON));
+
 	/** What record mode is waiting for. */
 	private enum RecordState {
 		/** Not recording. */
@@ -189,12 +198,26 @@ public class G13 extends JPanel {
 		recordKey = null;
 		setStatus("Recording: press the pad key to program (Esc or MR cancels)");
 		raiseWindow();
+
+		// The pad must not play its own bindings while a key is being programmed: the
+		// press that picks the key would fire that key's old binding, and we would
+		// capture that as the target. The heartbeat keeps this alive, so closing this
+		// window lets the pad work again a few seconds later.
+		control.send(Control.RECORD_ON);
+		recordHeartbeat.restart();
 	}
 
 	private void cancelRecording() {
 		recordState = RecordState.IDLE;
 		recordKey = null;
 		setStatus("Recording cancelled");
+		stopRecording();
+	}
+
+	/** Gives the pad back to the user. */
+	private void stopRecording() {
+		recordHeartbeat.stop();
+		control.send(Control.RECORD_OFF);
 	}
 
 	/** Brings this window forward: AWT cannot see a key press without focus. */
@@ -233,6 +256,7 @@ public class G13 extends JPanel {
 
 		recordState = RecordState.IDLE;
 		recordKey = null;
+		stopRecording();
 		setStatus("Recorded: " + keyName + " now sends " + JavaToLinuxKeymapping.cKeyCodeToString(code));
 		return true;
 	}

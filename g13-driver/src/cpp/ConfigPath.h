@@ -46,6 +46,12 @@ public:
     static std::string getEventFifoPath();
 
     /**
+     * @brief Gets the path of the control FIFO the config tool writes commands to.
+     * @return Path to the control pipe (e.g. /run/user/1000/g13-ctl).
+     */
+    static std::string getControlFifoPath();
+
+    /**
      * @brief Ensures that the configuration directory exists.
      * Creates it if it is missing.
      */

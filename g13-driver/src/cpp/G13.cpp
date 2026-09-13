@@ -65,6 +65,8 @@ G13::G13(libusb_device *device) {
     explicit_bindings.assign(G13_NUM_KEYS, 0);
     raw_keys.assign(G13_NUM_KEYS, 0);
     event_fifo_fd = -1;
+    ctl_fifo_fd = -1;
+    recording = false;
     mkey_binding.assign(G13_NUM_KEYS, -1);
     mbutton_down.assign(G13_NUM_KEYS, -1);
     for (int i = 0; i < G13_NUM_M_KEYS; i++) {
@@ -99,11 +101,13 @@ G13::G13(libusb_device *device) {
 
     init_fifo();
     init_event_fifo();
+    init_ctl_fifo();
 }
 
 G13::~G13() {
     cleanup_fifo(); 
     cleanup_event_fifo();
+    cleanup_ctl_fifo();
     if (!this->loaded) return;
     libusb_release_interface(this->handle, 0);
     libusb_close(this->handle);
@@ -121,6 +125,7 @@ void G13::start() {
     while (keepGoing && daemon_keep_running) {
         check_for_config_update();
         check_fifo();
+        check_ctl_fifo();
 
         if (read() == -4) {
             break; 
@@ -489,8 +494,10 @@ void G13::parse_key(int key, unsigned char *byte) {
                 // config tool). That is what the button does on the device: the code is
                 // sent so applications see the press, and the profile switches to the
                 // one that code names (Macro Preset 1/2/3 -> M1/M2/M3).
-                mbutton_reporter[mkey_binding[key]]->set(1);
-                mbutton_down[key] = mkey_binding[key];
+                if (!recording) {
+                    mbutton_reporter[mkey_binding[key]]->set(1);
+                    mbutton_down[key] = mkey_binding[key];
+                }
                 if (mkey_binding[key] < G13_NUM_PROFILES) {
                     selectProfile(mkey_binding[key]);
                 }
@@ -534,6 +541,11 @@ void G13::parse_key(int key, unsigned char *byte) {
     case 36: case 37: case 38: case 39:
         return;
     }
+
+    // While the config tool is recording, the pad reports presses to it but plays
+    // nothing: the press that picks the key to program would otherwise fire that
+    // key's old binding, and the tool would capture that as the key to map.
+    if (recording) return;
 
     if (actions[key]) {
         actions[key]->set(pressed);
@@ -714,6 +726,114 @@ void G13::cleanup_event_fifo() {
     }
     if (!event_fifo_path.empty()) {
         unlink(event_fifo_path.c_str());
+    }
+}
+
+/**
+ * @brief Creates the FIFO the config tool writes commands to.
+ *
+ * Same shape as the other two pipes: mode 0666, opened read-write and non-blocking
+ * so the driver does not wait for a writer.
+ */
+void G13::init_ctl_fifo() {
+    ctl_fifo_path = ConfigPath::getControlFifoPath();
+    ctl_fifo_fd = -1;
+
+    unlink(ctl_fifo_path.c_str());
+
+    if (mkfifo(ctl_fifo_path.c_str(), 0666) != 0) {
+        syslog(LOG_ERR, "Failed to create control FIFO at %s: %s", ctl_fifo_path.c_str(), strerror(errno));
+        return;
+    }
+
+    chmod(ctl_fifo_path.c_str(), 0666);
+    ctl_fifo_fd = ::open(ctl_fifo_path.c_str(), O_RDWR | O_NONBLOCK);
+
+    if (ctl_fifo_fd < 0) {
+        syslog(LOG_ERR, "Failed to open control FIFO: %s", strerror(errno));
+    } else {
+        syslog(LOG_INFO, "Control pipe created at %s", ctl_fifo_path.c_str());
+    }
+}
+
+void G13::cleanup_ctl_fifo() {
+    if (ctl_fifo_fd >= 0) {
+        ::close(ctl_fifo_fd);
+        ctl_fifo_fd = -1;
+    }
+    if (!ctl_fifo_path.empty()) {
+        unlink(ctl_fifo_path.c_str());
+    }
+}
+
+/**
+ * @brief Reads control commands and times the recording state out.
+ *
+ * Commands are one per line: "record 1" while the config tool is recording (it
+ * repeats this every couple of seconds) and "record 0" when it stops. The repeat is
+ * what makes this safe: if the config tool is closed or crashes mid-recording, the
+ * refresh stops and the pad starts working again a few seconds later instead of
+ * staying silent until the driver is restarted.
+ */
+void G13::check_ctl_fifo() {
+    if (ctl_fifo_fd >= 0) {
+        char buffer[1024];
+        ssize_t bytesRead = ::read(ctl_fifo_fd, buffer, sizeof(buffer) - 1);
+
+        if (bytesRead > 0) {
+            buffer[bytesRead] = '\0';
+            std::stringstream ss(buffer);
+            std::string line;
+
+            while (std::getline(ss, line)) {
+                if (line.rfind("record", 0) != 0) continue;
+
+                std::stringstream args(line);
+                std::string command;
+                int on = 0;
+                args >> command >> on;
+                setRecording(on != 0);
+            }
+        }
+    }
+
+    if (recording && std::chrono::steady_clock::now() > record_until) {
+        recording = false;
+        syslog(LOG_INFO, "Recording stopped responding, bindings re-enabled");
+    }
+}
+
+/**
+ * @brief Turns binding playback off or on while the config tool records.
+ * @param on true to suspend bindings.
+ */
+void G13::setRecording(bool on) {
+    record_until = std::chrono::steady_clock::now() + std::chrono::seconds(RECORD_TIMEOUT_SECONDS);
+
+    if (on == recording) return;
+
+    recording = on;
+
+    if (recording) {
+        // Whatever the pad is holding right now will never be released by the key
+        // itself, because bindings are suspended - so release it here.
+        releaseAllActions();
+        syslog(LOG_INFO, "Recording started: bindings suspended");
+    } else {
+        syslog(LOG_INFO, "Recording finished: bindings resumed");
+    }
+}
+
+/** Releases everything the pad is currently holding. */
+void G13::releaseAllActions() {
+    for (int i = 0; i < G13_NUM_KEYS; i++) {
+        if (actions[i] && actions[i]->isPressed()) {
+            actions[i]->set(0);
+        }
+        if (mbutton_down[i] >= 0) {
+            mbutton_reporter[mbutton_down[i]]->set(0);
+            mbutton_down[i] = -1;
+        }
     }
 }
 

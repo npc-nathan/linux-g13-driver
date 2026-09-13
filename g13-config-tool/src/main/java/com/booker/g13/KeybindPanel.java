@@ -34,8 +34,6 @@ public class KeybindPanel extends JPanel {
 	private static final long serialVersionUID = 1L;
 
 	// --- UI Components for the Button Type selector ---
-	/** Only meaningful for the M buttons, so it is hidden for every other key. */
-	private final JRadioButton switchProfileButton = new JRadioButton("Switch profile (default)");
 	private final JRadioButton noneButton = new JRadioButton("None (sends nothing)");
 	private final JRadioButton passthroughButton = new JRadioButton("Pass Through");
 	private final JRadioButton macroButton = new JRadioButton("Macro");
@@ -45,7 +43,13 @@ public class KeybindPanel extends JPanel {
 	private final JComboBox<Properties> macroSelectionBox = new JComboBox<>();
 	private final JCheckBox repeatsCheckBox = new JCheckBox("Auto Repeat");
 	private final JComboBox<String> mKeySelectionBox = new JComboBox<>();
-	private JLabel switchProfileSpacer;
+
+	/**
+	 * First entry of the M key dropdown for the M buttons: the device's own behaviour,
+	 * which is what the button does when the profile contains nothing for it.
+	 */
+	private static final String DEFAULT_SWITCH_CHOICE = "(default) switch profile";
+	private static final String DEFAULT_RECORD_CHOICE = "(default) macro record";
 
 	// --- UI Components for Screen Color ---
 	private final JButton colorChangeButton = new JButton("Click Here To Change");
@@ -84,7 +88,6 @@ public class KeybindPanel extends JPanel {
 		add(createColorPanel(), BorderLayout.NORTH);
 
 		final ButtonGroup buttonGroup = new ButtonGroup();
-		buttonGroup.add(switchProfileButton);
 		buttonGroup.add(noneButton);
 		buttonGroup.add(passthroughButton);
 		buttonGroup.add(macroButton);
@@ -93,15 +96,9 @@ public class KeybindPanel extends JPanel {
 		// Disable focus traversal for the passthrough text field to capture all key events.
 		passthroughText.setFocusTraversalKeysEnabled(false);
 
-		for (int i = 0; i < Key.M_KEY_COUNT; i++) {
-			mKeySelectionBox.addItem(JavaToLinuxKeymapping.mKeyName(i));
-		}
-
-		switchProfileSpacer = new JLabel(" ");
+		setMKeyChoices(false, null);
 
 		final JPanel grid = new JPanel(new GridLayout(0, 2, 5, 5)); // Layout with spacing
-		grid.add(switchProfileButton);
-		grid.add(switchProfileSpacer);
 		grid.add(noneButton);
 		grid.add(new JLabel(" ")); // Spacer
 		grid.add(passthroughButton);
@@ -126,7 +123,6 @@ public class KeybindPanel extends JPanel {
 	 */
 	private void attachListeners() {
 		// Use lambda expressions for concise listener implementation.
-		switchProfileButton.addActionListener(e -> updateComponentStateAndSave());
 		noneButton.addActionListener(e -> updateComponentStateAndSave());
 		macroButton.addActionListener(e -> updateComponentStateAndSave());
 		passthroughButton.addActionListener(e -> updateComponentStateAndSave());
@@ -182,15 +178,25 @@ public class KeybindPanel extends JPanel {
 	}
 
 	/**
-	 * Shows or hides the "Switch profile" / "Macro record" option, which only applies
-	 * to the M buttons, and labels it for the button being edited.
-	 * @param visible true when an M button is being edited.
-	 * @param label The option's label.
+	 * Fills the M key dropdown. For the M buttons the device's own behaviour comes
+	 * first, so "switch profile" and "macro record" are choices in the same list as the
+	 * M key codes rather than a separate button type.
+	 * @param isMKey true when an M button is being edited.
+	 * @param defaultLabel The label for the first entry, or null for no entry.
 	 */
-	private void setDefaultOption(final boolean visible, final String label) {
-		switchProfileButton.setText(label);
-		switchProfileButton.setVisible(visible);
-		switchProfileSpacer.setVisible(visible);
+	private void setMKeyChoices(final boolean isMKey, final String defaultLabel) {
+		final boolean wasLoading = loadingData;
+		loadingData = true;
+
+		mKeySelectionBox.removeAllItems();
+		if (isMKey && defaultLabel != null) {
+			mKeySelectionBox.addItem(defaultLabel);
+		}
+		for (int i = 0; i < Key.M_KEY_COUNT; i++) {
+			mKeySelectionBox.addItem(JavaToLinuxKeymapping.mKeyName(i));
+		}
+
+		loadingData = wasLoading;
 	}
 
 	/**
@@ -287,9 +293,8 @@ public class KeybindPanel extends JPanel {
 		for (final JComponent c : all) {
 			c.setEnabled(isKeySelected);
 		}
-		switchProfileButton.setEnabled(isKeySelected);
-		// M1-M3 switch profile by default; MR sends the macro record event.
-		setDefaultOption(isMKey, isProfileButton ? "Switch profile (default)" : "Macro record (default)");
+		// M1-M3 switch profile; MR records. Both are entries in the M key dropdown.
+		setMKeyChoices(isMKey, isProfileButton ? DEFAULT_SWITCH_CHOICE : DEFAULT_RECORD_CHOICE);
 		revalidate();
 		repaint();
 
@@ -306,7 +311,10 @@ public class KeybindPanel extends JPanel {
 
 		if (val == null || val.isBlank()) {
 			if (isMKey) {
-				switchProfileButton.setSelected(true);
+				// Nothing in the file for this button: the device's own behaviour, which
+				// is the first entry of the M key dropdown.
+				mKeyButton.setSelected(true);
+				mKeySelectionBox.setSelectedIndex(0);
 			} else {
 				noneButton.setSelected(true);
 			}
@@ -322,8 +330,14 @@ public class KeybindPanel extends JPanel {
 			if ("x".equals(type)) { // Explicitly nothing
 				noneButton.setSelected(true);
 			} else if ("mk".equals(type)) { // M key code
+				final int index = (parts.length >= 2) ? Integer.parseInt(parts[1]) : 0;
+				// The M buttons have the device's own behaviour as the first entry, so
+				// their codes sit one place further along.
+				final int choice = isMKey ? index + 1 : index;
 				mKeyButton.setSelected(true);
-				mKeySelectionBox.setSelectedIndex(parts.length >= 2 ? Integer.parseInt(parts[1]) : 0);
+				if (choice >= 0 && choice < mKeySelectionBox.getItemCount()) {
+					mKeySelectionBox.setSelectedIndex(choice);
+				}
 			} else if ("m".equals(type)) { // Macro type
 				macroButton.setSelected(true);
 				int macroNum = (parts.length >= 2) ? Integer.parseInt(parts[1]) : 0;
@@ -394,13 +408,7 @@ public class KeybindPanel extends JPanel {
 		final boolean isMKey = Key.isMKey(key.getG13KeyCode());
 		String prop = "G" + key.getG13KeyCode();
 
-		if (switchProfileButton.isVisible() && switchProfileButton.isSelected()) {
-			// Back to the driver's default: this M button switches profile (M1-M3) or
-			// sends the macro record event (MR) again.
-			bindings.remove(prop);
-			key.setMappedValue(Key.isProfileButton(key.getG13KeyCode()) ? "Switches profile" : "Macro record");
-			key.setRepeats("N/A");
-		} else if (noneButton.isSelected()) {
+		if (noneButton.isSelected()) {
 			if (isMKey) {
 				// An M button with no entry does something by default, so "nothing"
 				// has to be stated explicitly.
@@ -442,11 +450,24 @@ public class KeybindPanel extends JPanel {
 				}
 			}
 		} else if (mKeyButton.isSelected()) {
-			// Send one of the M key codes, exactly as the kernel would.
-			final int mKeyIndex = mKeySelectionBox.getSelectedIndex();
-			bindings.put(prop, "mk," + mKeyIndex);
+			// The M key dropdown: for the M buttons the first entry is the device's own
+			// behaviour, the rest are the M key codes.
+			final int selection = mKeySelectionBox.getSelectedIndex();
+			final int mKeyIndex = isMKey ? selection - 1 : selection;
 
-			key.setMappedValue("M Key: " + JavaToLinuxKeymapping.mKeyShortName(mKeyIndex));
+			if (isMKey && selection <= 0) {
+				// Absent entry: M1-M3 switch profile, MR records.
+				bindings.remove(prop);
+				key.setMappedValue(Key.isProfileButton(key.getG13KeyCode())
+						? "Switches profile" : "Macro record");
+			} else if (mKeyIndex < 0) {
+				bindings.remove(prop);
+				key.setMappedValue("Unassigned");
+			} else {
+				bindings.put(prop, "mk," + mKeyIndex);
+				key.setMappedValue("M Key: " + JavaToLinuxKeymapping.mKeyShortName(mKeyIndex));
+			}
+
 			key.setRepeats("N/A");
 		}
 

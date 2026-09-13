@@ -123,12 +123,11 @@ macro record button and sends `KEY_MACRO_RECORD_START`, unless the profile binds
 Pressing any of the M buttons on the pad selects it for editing like any other key.
 
 Button types: a selected key can be **None**, **Pass Through**, **Macro** or
-**M Key event** (one of the M button codes). For the M buttons there is one extra
-option, labelled for the button: **Switch profile (default)** on M1-M3 and
-**Macro record (default)** on MR. Those are the driver's own defaults, and they are
-what you get when the profile contains no entry for that button. Choosing *None* for
-an M button stores `x`, an explicit "do nothing", because simply removing the entry
-would fall back to the default behaviour.
+**M Key event**. For the M buttons the M key list carries one extra entry at the top,
+`(default) switch profile` on M1-M3 and `(default) macro record` on MR — that is what
+the button does when the profile contains no entry for it, and picking it removes the
+entry again. Choosing *None* for an M button stores `x`, an explicit "do nothing",
+because an absent entry there means the device's own behaviour.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
@@ -147,6 +146,12 @@ Press **MR** on the pad while the config tool is open:
 The tool has to have focus to see the key you press, which is why it comes to the
 front. Pad presses reach it through the driver's event pipe at
 `$XDG_RUNTIME_DIR/g13-events`, so the driver and the tool both need to be running.
+
+While recording, the tool tells the driver to **suspend bindings** (`g13-ctl`), so the
+press that selects the key to program does not fire that key's old binding — otherwise
+the tool would capture that key as the one to map. The command is refreshed every couple
+of seconds; if the tool is closed or crashes mid-recording the pad starts working again
+by itself a few seconds later.
 
 Mouse buttons and gamepad inputs cannot be recorded yet: the driver's virtual device
 does not advertise those codes, so there is nothing to send.

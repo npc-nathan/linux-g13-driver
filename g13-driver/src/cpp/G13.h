@@ -82,6 +82,20 @@ private:
     void cleanup_event_fifo();
     void write_event(int key, int pressed);
 
+    // Control pipe: the config tool says when it is recording, so the pad stops
+    // playing bindings while a key is being programmed - otherwise the press that
+    // selects the key to program also fires that key's old binding, and the tool
+    // captures that instead of the key the user pressed.
+    int ctl_fifo_fd;
+    std::string ctl_fifo_path;
+    void init_ctl_fifo();
+    void cleanup_ctl_fifo();
+    void check_ctl_fifo();
+    void setRecording(bool on);
+    void releaseAllActions();
+    bool recording;
+    std::chrono::steady_clock::time_point record_until;
+
     // Physical state of every key, so only changes are reported.
     std::vector<unsigned char> raw_keys;
 

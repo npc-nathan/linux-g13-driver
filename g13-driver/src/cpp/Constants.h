@@ -14,6 +14,11 @@
 #define G13_NUM_PROFILES 3      // Binding profiles: M1, M2, M3. (MR is the record button.)
 #define G13_NUM_M_KEYS 4        // The four M buttons: M1, M2, M3, MR.
 
+// How long recording stays on without a refresh from the config tool, in seconds.
+// The tool repeats the command while it records, so this only elapses when it has
+// been closed or has crashed.
+#define RECORD_TIMEOUT_SECONDS 5
+
 // Linux event codes sent by the "M key" binding type (mk,<index>) and by profile
 // buttons that the active profile overrides. These are the codes the mainline
 // kernel emits for the same buttons (drivers/hid/hid-lg-g15.c, g13_keys_for_bits[]).

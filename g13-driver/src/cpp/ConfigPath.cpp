@@ -82,3 +82,11 @@ std::string ConfigPath::getEventFifoPath() {
     }
     return "/tmp/g13-events";
 }
+
+std::string ConfigPath::getControlFifoPath() {
+    const char* xdgRuntime = getenv("XDG_RUNTIME_DIR");
+    if (xdgRuntime && *xdgRuntime) {
+        return std::string(xdgRuntime) + "/g13-ctl";
+    }
+    return "/tmp/g13-ctl";
+}
