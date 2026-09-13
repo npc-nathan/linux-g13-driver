@@ -21,6 +21,7 @@ import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -61,6 +62,10 @@ public class ScreenPanel extends JPanel {
     private final JCheckBox cycleBox = new JCheckBox("Cycle through them");
     private final JSpinner cycleSpinner = new JSpinner(new SpinnerNumberModel(10, 2, 600, 1));
 
+    /** Who owns the screen and the four buttons beside it, and who has them right now. */
+    private final JComboBox<String> buttonMode = new JComboBox<>(new String[]{"auto", "visuals", "sdk"});
+    private final JLabel owner = new JLabel(" ");
+
     private final JLabel status = new JLabel(" ");
     private final Preview preview = new Preview();
 
@@ -95,7 +100,30 @@ public class ScreenPanel extends JPanel {
         add(daemonPanel(), BorderLayout.SOUTH);
 
         reload();
+        syncButtonMode();
         new Timer(POLL_MS, e -> refresh()).start();
+    }
+
+    /**
+     * Shows, and follows, the mode that decides who has the screen and the four buttons.
+     *
+     * The file is the shared truth: g13-buttons and this window both write it, and the
+     * daemon obeys it, so a change made anywhere shows up here within a second.
+     */
+    private void syncButtonMode() {
+        final String mode = Visuals.readButtonMode();
+        if (!mode.equals(buttonMode.getSelectedItem())) {
+            buttonMode.setSelectedItem(mode);
+        }
+
+        final String who = Visuals.screenOwner();
+        if ("sdk".equals(who)) {
+            owner.setText("now: the SDK client (the preview is the last frame the visuals drew)");
+        } else if ("visuals".equals(who)) {
+            owner.setText("now: the visuals");
+        } else {
+            owner.setText("now: unknown - is g13-visuals running?");
+        }
     }
 
     // --- the preview ---
@@ -204,6 +232,7 @@ public class ScreenPanel extends JPanel {
         preview.repaint();
         status.setText(String.format("g13-visuals: %s   ·   showing '%s'   ·   %d enabled",
                 daemonState(), visuals.active(), visuals.enabled().size()));
+        syncButtonMode();
     }
 
     // --- the visuals editor ---
@@ -234,7 +263,29 @@ public class ScreenPanel extends JPanel {
         options.add(new JLabel("seconds"));
         cycleBox.addActionListener(e -> apply());
         cycleSpinner.addChangeListener(e -> apply());
-        panel.add(options, BorderLayout.SOUTH);
+
+        // Who has the screen and the four buttons beside it. One setting, three choices, and
+        // no confirm button: it applies the moment it is picked.
+        final JPanel ownership = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        ownership.add(new JLabel("Screen and L1-L4:"));
+        buttonMode.setToolTipText("auto: an SDK client takes over while it is there   "
+                + "visuals: the applet menu always keeps them   "
+                + "sdk: an SDK client always has them");
+        buttonMode.addActionListener(e -> {
+            final Object picked = buttonMode.getSelectedItem();
+            if (picked != null) {
+                Visuals.writeButtonMode(picked.toString());
+            }
+            syncButtonMode();
+        });
+        ownership.add(buttonMode);
+        ownership.add(owner);
+
+        final JPanel south = new JPanel();
+        south.setLayout(new BoxLayout(south, BoxLayout.Y_AXIS));
+        south.add(options);
+        south.add(ownership);
+        panel.add(south, BorderLayout.SOUTH);
 
         return panel;
     }

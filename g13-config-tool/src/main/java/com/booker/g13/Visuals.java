@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The visuals configuration: which visuals exist, which are enabled and in what order,
@@ -144,6 +146,50 @@ public class Visuals {
         }
         known.putAll(applets());
         return known;
+    }
+
+    /** Who owns the screen and the four buttons beside it: auto, visuals or sdk. */
+    public static String readButtonMode() {
+        try {
+            final String mode = Files.readString(configDir().resolve("button-mode"))
+                    .trim().toLowerCase();
+            return "visuals".equals(mode) || "sdk".equals(mode) ? mode : "auto";
+        } catch (IOException | RuntimeException e) {
+            return "auto";
+        }
+    }
+
+    /**
+     * Writes the same file the daemon and g13-buttons read, so a change applies within a
+     * second wherever it was made.
+     */
+    public static void writeButtonMode(final String mode) {
+        try {
+            Files.createDirectories(configDir());
+            Files.writeString(configDir().resolve("button-mode"), mode.trim().toLowerCase() + "\n");
+        } catch (IOException e) {
+            System.err.println("could not save the button mode: " + e);
+        }
+    }
+
+    /**
+     * Who has the screen now - "sdk", "visuals" - from the file the daemon publishes.
+     *
+     * @return the owner, or "unknown" when the daemon is not running.
+     */
+    public static String screenOwner() {
+        final String runtime = System.getenv("XDG_RUNTIME_DIR");
+        if (runtime == null || runtime.isBlank()) {
+            return "unknown";
+        }
+        try {
+            final String published = Files.readString(Path.of(runtime, "g13-values.json"));
+            final Matcher found = Pattern.compile("\"screen_owner\"\\s*:\\s*\"([a-z]+)\"")
+                    .matcher(published);
+            return found.find() ? found.group(1) : "unknown";
+        } catch (IOException | RuntimeException e) {
+            return "unknown";
+        }
     }
 
     /**

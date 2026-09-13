@@ -202,8 +202,54 @@ arrives in one `read()` as one frame - which is what keeps a screen built from s
 from flickering.
 
 Limits, stated rather than discovered later: two programs calling `LogiLcdUpdate()` will fight
-over the screen (Logitech's LCD Manager rotated between applets; there is no manager here), and
-the Windows proxy has never been run against a game.
+over the screen (Logitech's LCD Manager rotated between applets; there is no manager here).
+
+### Games under Wine or Proton
+
+A Windows program cannot use the driver's Unix sockets, so the Windows build of the library
+talks to `g13-lcd-bridge` over TCP on 127.0.0.1 instead, and the bridge relays both ways
+(frames down to the driver, button events back up):
+
+    make -C g13-driver/src/lcdsdk windows   # a PE32+ LogitechLcd.dll, built with mingw-w64
+    g13-lcd-bridge                          # the other half of that conversation
+
+Put the DLL in the game's prefix with a DLL override (`WINEDLLOVERRIDES=LogitechLcd=n,b`) and
+run the bridge. `G13_LCD_TCP=host:port` overrides where the library looks.
+
+The Windows transport is also built for Linux (`-DG13_TCP_TRANSPORT=1`), which is how it is
+tested here without Wine: `make test-lcdsdk-proxy` runs the same code through the bridge,
+checks the frames pixel by pixel, the button events coming back, and that the DLL's exports
+are the SDK's ten. What has *not* been run is a real game under Proton - the plumbing is
+proven, the game is not.
+
+An example client, in Python, using the same library a game would load:
+
+    python3 g13-driver/src/lcdsdk/example-logitech-lcd.py
+
+### Who owns the screen and the four buttons
+
+The buttons beside the screen are shared: the visuals menu uses them, and so does an SDK
+client (that is what its button query is for). One setting decides:
+
+| mode | the screen and L1-L4 |
+| --- | --- |
+| `auto` (default) | an SDK client takes over while it is connected, otherwise the visuals |
+| `visuals` | the visuals always keep them - an SDK client would have to wait |
+| `sdk` | an SDK client always has them, connected or not |
+
+    g13-buttons            # show the mode, and who has the screen now
+    g13-buttons auto       # or visuals, or sdk
+
+The same control is in the config tool's **Screen** window ("Screen and L1-L4"), and in the
+file both write: `$XDG_CONFIG_HOME/g13/button-mode`. It applies within a second - no restart,
+no confirm button.
+
+How the daemon knows a client is there: the library touches `$XDG_RUNTIME_DIR/g13-sdk-client`
+on every frame, and the bridge keeps it fresh while a Windows client is connected. A file
+older than three seconds counts as gone, so a client that is killed outright cannot leave the
+pad deaf to its own buttons. While a client owns the screen the daemon stops drawing and
+stops reading the buttons, and it says so in the tool ("now: the SDK client"): the preview
+then shows the last frame the visuals drew, not what is on the panel.
 
 ## The event bus
 

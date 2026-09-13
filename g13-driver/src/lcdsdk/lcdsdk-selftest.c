@@ -11,6 +11,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 static int failures = 0;
 
@@ -20,6 +21,23 @@ static void check(const char *what, int ok)
     if (!ok) {
         failures++;
     }
+}
+
+/* IsButtonPressed() answers about right now, so a caller that asks the instant it connects -
+ * or the instant after a button changes - can legitimately be told nothing yet. A game polls
+ * it every frame; over the bridge the answer arrives a moment later, so a test that asked
+ * once would be measuring how fast the bridge is, not whether it works. */
+static int button_settles(unsigned button, int pressed)
+{
+    struct timespec pause = { 0, 10 * 1000 * 1000 };   /* 10 ms */
+
+    for (int attempt = 0; attempt < 100; attempt++) {
+        if (LogiLcdIsButtonPressed(button) == (pressed ? 1 : 0)) {
+            return 1;
+        }
+        nanosleep(&pause, NULL);
+    }
+    return 0;
 }
 
 static void put(uint8_t *bitmap, int x, int y)
@@ -74,12 +92,12 @@ int main(void)
 
     LogiLcdUpdate();
 
-    check("button 0 (L1) is pressed", LogiLcdIsButtonPressed(LOGI_LCD_MONO_BUTTON_0));
-    check("button 2 (L3) is pressed", LogiLcdIsButtonPressed(LOGI_LCD_MONO_BUTTON_2));
-    check("button 1 (L2) is not pressed", !LogiLcdIsButtonPressed(LOGI_LCD_MONO_BUTTON_1));
-    check("button 3 (L4) is not pressed", !LogiLcdIsButtonPressed(LOGI_LCD_MONO_BUTTON_3));
+    check("button 0 (L1) is pressed", button_settles(LOGI_LCD_MONO_BUTTON_0, 1));
+    check("button 2 (L3) is pressed", button_settles(LOGI_LCD_MONO_BUTTON_2, 1));
+    check("button 1 (L2) is not pressed", button_settles(LOGI_LCD_MONO_BUTTON_1, 0));
+    check("button 3 (L4) is not pressed", button_settles(LOGI_LCD_MONO_BUTTON_3, 0));
     check("a colour button is not pressed",
-          !LogiLcdIsButtonPressed(LOGI_LCD_COLOR_BUTTON_OK));
+          button_settles(LOGI_LCD_COLOR_BUTTON_OK, 0));
 
     G13LcdSetTextA(1, "PLAIN C");
     LogiLcdUpdate();

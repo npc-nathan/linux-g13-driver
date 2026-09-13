@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Who owns the screen and the four buttons beside it - and how to change it.
+
+    g13-buttons              show the mode, and who has the screen right now
+    g13-buttons auto         an SDK client takes over while it is connected (the default)
+    g13-buttons visuals      the visuals always keep the screen and the four buttons
+    g13-buttons sdk          an SDK client always has them, whether or not one is present
+
+"An SDK client" means a program using the Logitech LCD SDK - a game, an LCD applet, or one
+of those under Wine through the bridge. While an SDK client has the buttons, the visuals menu
+does not read them, so the client gets them the way it expects.
+
+The same setting is in the config tool's Screen window, and it is one line in
+$XDG_CONFIG_HOME/g13/button-mode, which the daemon picks up within a second.
+"""
+import os
+import sys
+import time
+from pathlib import Path
+
+MODES = ("auto", "visuals", "sdk")
+CLIENT_FRESH_SECONDS = 3.0
+USAGE = __doc__.strip().splitlines()[0]
+
+
+def config_dir():
+    root = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(root) / "g13"
+
+
+def runtime_dir():
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+
+
+def current_mode():
+    try:
+        mode = (config_dir() / "button-mode").read_text().strip().lower()
+    except OSError:
+        return "auto"
+    return mode if mode in MODES else "auto"
+
+
+def set_mode(mode):
+    path = config_dir() / "button-mode"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(mode + "\n")
+
+
+def client_present():
+    """An SDK client keeps this file fresh while it draws; a stale one died without saying
+    goodbye, and counts as gone."""
+    try:
+        age = time.time() - (runtime_dir() / "g13-sdk-client").stat().st_mtime
+    except OSError:
+        return False
+    return age <= CLIENT_FRESH_SECONDS
+
+
+def owner(mode, present):
+    if mode == "sdk" or (mode == "auto" and present):
+        return "sdk"
+    return "visuals"
+
+
+def describe(mode, present):
+    who = owner(mode, present)
+    lines = [
+        "mode:              %s" % mode,
+        "SDK client:        %s" % ("yes" if present else "no"),
+        "screen and L1-L4:  %s" % (
+            "the SDK client" if who == "sdk" else "the visuals (the applet menu)"),
+    ]
+    if mode == "auto":
+        lines.append("                   (auto: whichever is there)")
+    elif mode == "visuals":
+        lines.append("                   (an SDK client would have to wait)")
+    else:
+        lines.append("                   (the visuals are held off)")
+    return "\n".join(lines)
+
+
+def main(argv):
+    if len(argv) == 1:
+        print(describe(current_mode(), client_present()))
+        return 0
+
+    requested = argv[1].strip().lower()
+    if requested in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    if requested not in MODES:
+        print("unknown mode: %s" % argv[1], file=sys.stderr)
+        print("use one of: %s" % ", ".join(MODES), file=sys.stderr)
+        return 2
+
+    set_mode(requested)
+    print(describe(requested, client_present()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

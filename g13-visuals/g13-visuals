@@ -980,6 +980,79 @@ PUBLISHED_SOURCES = [
     "screen_width", "screen_height",
 ]
 
+# Who owns the screen and the four buttons beside it. Logitech's own software rotated between
+# applets; here it is one or the other, chosen by whoever is using the pad.
+BUTTON_MODE_FILE = "button-mode"
+BUTTON_MODES = ("auto", "visuals", "sdk")
+
+# Our Logitech LCD SDK implementation touches this while it is drawing, and the Windows
+# bridge keeps it fresh while a client is connected.
+SDK_CLIENT_FILE = "g13-sdk-client"
+SDK_CLIENT_FRESH_SECONDS = 3.0
+
+
+def runtime_path(name):
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    return os.path.join(runtime, name)
+
+
+def button_mode():
+    """'auto', 'visuals' or 'sdk' - read from the file the tool and the CLI write."""
+    try:
+        mode = (config_dir() / BUTTON_MODE_FILE).read_text().strip().lower()
+    except OSError:
+        return "auto"
+    return mode if mode in BUTTON_MODES else "auto"
+
+
+def set_button_mode(mode):
+    path = config_dir() / BUTTON_MODE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(mode.strip().lower() + "\n")
+
+
+def sdk_client_present(now=None, runtime=None):
+    """Whether a Logitech-LCD-SDK client - a game, an applet, the Windows bridge - is drawing.
+
+    A file that has gone stale means the client died without shutting down, so it counts as
+    gone: otherwise one crash would leave the pad deaf to its own buttons for good.
+    """
+    moment = time.time() if now is None else now
+    path = os.path.join(runtime or runtime_path(""), SDK_CLIENT_FILE)
+    try:
+        return moment - os.stat(path).st_mtime <= SDK_CLIENT_FRESH_SECONDS
+    except OSError:
+        return False
+
+
+def should_pause(mode, client_present):
+    """Whether the visuals should keep their hands off the screen and the four buttons.
+
+    auto    - yes while an SDK client is connected, no when it is not
+    visuals - never: the menu keeps the screen and the buttons
+    sdk     - always: an SDK client owns them whether or not one is connected
+    """
+    if mode == "sdk":
+        return True
+    if mode == "visuals":
+        return False
+    return bool(client_present)
+
+
+def screen_state(mode, client_present, paused):
+    """A few extra values, so the config tool can say who has the screen."""
+    return {"button_mode": mode, "sdk_client": client_present,
+            "screen_owner": "sdk" if paused else "visuals"}
+
+
+def publish_values(values):
+    """The live values on their own, for when the screen is not ours to draw."""
+    try:
+        with open(runtime_path("g13-values.json"), "w") as handle:
+            json.dump(values, handle, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
 
 def publish(lines, values):
     """Publishes what is on the screen, and the live values, for the config tool.
@@ -987,14 +1060,12 @@ def publish(lines, values):
     The tool cannot read the panel, so this is how its preview shows the real thing and
     how the applet designer previews a design against live data.
     """
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
     try:
-        with open(os.path.join(runtime, "g13-screen"), "w") as handle:
+        with open(runtime_path("g13-screen"), "w") as handle:
             handle.write("\n".join(lines) + "\n")
-        with open(os.path.join(runtime, "g13-values.json"), "w") as handle:
-            json.dump(values, handle, indent=2, sort_keys=True)
     except OSError:
         pass
+    publish_values(values)
 
 
 def config_supersedes(engine, fresh):
@@ -1035,8 +1106,23 @@ def main():
 
         print("g13-visuals: connected to %s, showing '%s'" % (socket_path(), engine.active), flush=True)
         pending = b""
+        paused = None
+        last_state_published = 0.0
 
         while True:
+            # Who has the screen and the four buttons beside it. A mode the user set, and
+            # whether an SDK client is actually drawing.
+            mode = button_mode()
+            client_present = sdk_client_present()
+            pause = should_pause(mode, client_present)
+            if pause != paused:
+                paused = pause
+                print("g13-visuals: %s" % (
+                    "an SDK client has the screen and the four buttons ('%s')" % mode
+                    if pause else
+                    "the visuals have the screen and the four buttons ('%s')" % mode),
+                    flush=True)
+
             try:
                 chunk = connection.recv(4096)
             except socket.timeout:
@@ -1053,7 +1139,9 @@ def main():
                     line, pending = pending.split(b"\n", 1)
                     fields = line.decode(errors="replace").split()
                     if len(fields) >= 3 and fields[0] == "key":
-                        engine.on_key(int(fields[1]), fields[2] != "0")
+                        # While an SDK client owns the buttons, they are its input to read.
+                        if not paused:
+                            engine.on_key(int(fields[1]), fields[2] != "0")
                         dirty = True
                     elif len(fields) >= 3 and fields[0] == "state":
                         engine.on_state(fields[1], fields[2])
@@ -1081,7 +1169,7 @@ def main():
                         dirty = True
 
             # --- draw when the visual asks for it, or straight after a button ---
-            if dirty or now - last_drawn >= engine.interval():
+            if not paused and (dirty or now - last_drawn >= engine.interval()):
                 lines = engine.tick()
                 g13lcd.send(lines)
 
@@ -1090,13 +1178,23 @@ def main():
                 if isinstance(active, LayoutVisual):
                     sources += [source for source in active.sources()
                                 if not source.startswith("cmd:")]
-                publish(lines, values.all(sources))
+                published = values.all(sources)
+                published.update(screen_state(mode, client_present, False))
+                publish(lines, published)
 
                 last_drawn = now
                 if shown_state != engine.snapshot():
                     shown_state = engine.snapshot()
                     write_config(shown_state)
                 dirty = False
+
+            elif paused and now - last_state_published >= 1.0:
+                # Keep the values current while an SDK client has the screen: the tool shows
+                # who owns it from these, and a stale file would say the wrong thing.
+                last_state_published = now
+                state = values.all(PUBLISHED_SOURCES)
+                state.update(screen_state(mode, client_present, True))
+                publish_values(state)
 
 
 if __name__ == "__main__":

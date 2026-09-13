@@ -129,8 +129,9 @@ install-user:
 	cp scripts/g13-keywatch $(USER_INSTALL_DIR)/g13-keywatch
 	cp scripts/g13-lcd $(USER_INSTALL_DIR)/g13-lcd
 	cp scripts/g13-watch $(USER_INSTALL_DIR)/g13-watch
+	cp scripts/g13-buttons $(USER_INSTALL_DIR)/g13-buttons
 	cp scripts/g13lcd.py $(USER_INSTALL_DIR)/g13lcd.py
-	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch
+	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch $(USER_INSTALL_DIR)/g13-buttons
 	
 	# Screen visuals (applets and menu)
 	cp ../g13-visuals/g13-visuals $(USER_INSTALL_DIR)/g13-visuals
