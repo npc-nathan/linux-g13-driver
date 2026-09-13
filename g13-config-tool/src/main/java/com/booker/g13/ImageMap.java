@@ -1,12 +1,19 @@
 package com.booker.g13;
 
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.Point;
+import java.awt.RenderingHints;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.NoninvertibleTransformException;
+import java.awt.geom.Point2D;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -17,14 +24,24 @@ import javax.swing.JLabel;
  * A custom JLabel that displays an image of the G13 keypad and acts as an interactive map.
  * It detects mouse movements and clicks over specific key areas (defined by polygons)
  * and notifies listeners about these events.
+ *
+ * <p>The photo and the key outlines are drawn through one shared transform. The key
+ * polygons in {@link Key} are expressed in the photo's own pixel coordinates, so the
+ * transform scales and positions both together and mouse coordinates are mapped back
+ * through the same transform for hit testing. (A JLabel icon would be drawn centred at
+ * its natural size while the outlines stayed at the component origin, so the two drifted
+ * apart as soon as the window was resized.)
  */
 public class ImageMap extends JLabel {
 
 	private static final long serialVersionUID = 1L;
 
-	/** The background image of the G13 keypad. */
+	/** The background image of the G13 keypad. Also used as the application icon. */
 	public static final ImageIcon G13_KEYPAD = ImageIconHelper.loadEmbeddedImage("/com/booker/g13/images/g13.gif");
-	
+
+	/** The photo itself. Key polygons live in this image's pixel coordinate system. */
+	private final Image photo = G13_KEYPAD.getImage();
+
 	/** A list of listeners to be notified of mouse events on keys. */
 	private final List<ImageMapListener> listeners = new ArrayList<>();
 
@@ -32,23 +49,34 @@ public class ImageMap extends JLabel {
 	private final Color outlineColor = Color.red.darker(); // Color for the key outlines.
 	private final Color selectedColor = new Color(0, 255, 0, 128); // Semi-transparent green for selected key.
 	private final Color mouseoverColor = new Color(255, 0, 0, 128); // Semi-transparent red for hovered key.
-    
+
+	/** Where the tooltip is anchored, in photo (key) coordinates: below the keypad. */
+	private static final double TOOLTIP_ANCHOR_X = 110;
+	private static final double TOOLTIP_ANCHOR_Y = 550;
+	/** Horizontal distance between the tooltip's label and value columns, in pixels. */
+	private static final int TOOLTIP_VALUE_OFFSET = 135;
+
 	private Key selected = null; // The currently clicked/selected key.
 	private Key mouseover = null; // The key currently under the mouse cursor.
-	
+
 	/**
 	 * Constructs the ImageMap component and initializes its mouse listeners.
 	 */
 	public ImageMap() {
-		super(G13_KEYPAD);
-		
+		// No icon is passed to the label: paintComponent() draws the photo so that it can
+		// be scaled in step with the key outlines.
+		super();
+
+		// At the natural photo size the map is 1:1, which is what the frame packs to.
+		setPreferredSize(new Dimension(photo.getWidth(null), photo.getHeight(null)));
+
 		addMouseMotionListener(new MouseMotionListener() {
 			@Override
 			public void mouseDragged(MouseEvent e) { /* Not used */ }
 
 			@Override
 			public void mouseMoved(MouseEvent e) {
-				Key key = Key.getKeyAt(e.getPoint().x, e.getPoint().y);
+				Key key = keyAt(e.getPoint());
 				// Repaint only if the mouseover state changes to avoid unnecessary redraws.
 				if (key == null && mouseover == null) {
 					return;
@@ -72,7 +100,7 @@ public class ImageMap extends JLabel {
 		addMouseListener(new MouseListener() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
-				Key key = Key.getKeyAt(e.getPoint().x, e.getPoint().y);
+				Key key = keyAt(e.getPoint());
 				
 				// Repaint only if the selection state changes.
 				if (key == null && selected == null) {
@@ -97,7 +125,13 @@ public class ImageMap extends JLabel {
 			@Override public void mousePressed(MouseEvent e) { }
 			@Override public void mouseReleased(MouseEvent e) { }
 			@Override public void mouseEntered(MouseEvent e) { }
-			@Override public void mouseExited(MouseEvent e) { }
+			@Override public void mouseExited(MouseEvent e) {
+				if (mouseover != null) {
+					mouseover = null;
+					repaint();
+					fireMouseover();
+				}
+			}
 		});
 	}
 	
@@ -142,18 +176,73 @@ public class ImageMap extends JLabel {
 			}
 		}
 	}
+
+	/**
+	 * Builds the transform from photo (key) coordinates to component coordinates:
+	 * a uniform scale that keeps the photo's aspect ratio, centred in the component.
+	 * @return The transform, or the identity transform if the component is not sized yet.
+	 */
+	private AffineTransform keyToComponent() {
+		final int w = getWidth(), h = getHeight();
+		final int pw = photo.getWidth(null), ph = photo.getHeight(null);
+		if (w <= 0 || h <= 0 || pw <= 0 || ph <= 0) {
+			return new AffineTransform();
+		}
+
+		final double scale = Math.min((double) w / pw, (double) h / ph);
+		final AffineTransform tx = new AffineTransform();
+		// Scale about the origin, then centre: point -> scale * point + offset.
+		tx.translate((w - pw * scale) / 2.0, (h - ph * scale) / 2.0);
+		tx.scale(scale, scale);
+		return tx;
+	}
+
+	/**
+	 * Converts a point in component coordinates to photo (key) coordinates, so that
+	 * hit testing works at any window size.
+	 * @param point The point in component coordinates.
+	 * @return The equivalent point in key coordinates.
+	 */
+	private Point2D toKeySpace(final Point point) {
+		try {
+			return keyToComponent().createInverse().transform(point, null);
+		} catch (NoninvertibleTransformException e) {
+			return point;
+		}
+	}
+
+	/**
+	 * Finds the key under a point given in component coordinates.
+	 * @param point The point in component coordinates.
+	 * @return The key at that point, or null.
+	 */
+	Key keyAt(final Point point) {
+		final Point2D keyPoint = toKeySpace(point);
+		return Key.getKeyAt((int) Math.round(keyPoint.getX()), (int) Math.round(keyPoint.getY()));
+	}
 	
 	@Override
 	protected void paintComponent(Graphics g) {
-		super.paintComponent(g);
-		
-		// Create a copy of the Graphics object to avoid side effects.
 		final Graphics2D g2d = (Graphics2D) g.create();
         try {
+        	g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        	g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+
+        	// Photo and outlines share one transform, so they can never drift apart.
+        	final AffineTransform tx = keyToComponent();
+        	g2d.drawImage(photo, tx, null);
+
+            g2d.transform(tx);
             // Paint highlights and outlines in order.
             paintSelected(g2d);
             paintMouseover(g2d);
             paintKeyOutlines(g2d);
+
+            // The tooltip is drawn unscaled, in component coordinates, so it stays legible.
+            g2d.setTransform(new AffineTransform());
+            if (mouseover != null) {
+                drawTooltip(g2d, mouseover);
+            }
         } finally {
             g2d.dispose(); // Always dispose of the created graphics context.
         }
@@ -183,13 +272,11 @@ public class ImageMap extends JLabel {
         g.fill(mouseover.getShape());
 		g.setColor(mouseoverColor.darker());
 		g.draw(mouseover.getShape());
-		
-		drawTooltip(g, mouseover);
 	}
 
     /**
      * Draws a tooltip-like box with details about the hovered key.
-     * @param g The graphics context to draw on.
+     * @param g The graphics context to draw on, in component coordinates.
      * @param key The key to display information for.
      */
     private void drawTooltip(Graphics2D g, Key key) {
@@ -208,10 +295,12 @@ public class ImageMap extends JLabel {
                 {"Repeats",        key.getRepeats()},
             };
         }
-		
-		final int x0 = 110; // X-coordinate for the labels.
-		final int x1 = 245; // X-coordinate for the values.
-		int y = 550; // Starting Y-coordinate.
+
+        // Anchor the block below the keypad, converting from key to component coordinates.
+        final Point2D anchor = keyToComponent().transform(new Point2D.Double(TOOLTIP_ANCHOR_X, TOOLTIP_ANCHOR_Y), null);
+		final int x0 = (int) Math.round(anchor.getX());
+		final int x1 = x0 + TOOLTIP_VALUE_OFFSET;
+		int y = (int) Math.round(anchor.getY());
         g.setFont(getFont().deriveFont(Font.BOLD));
 
 		for (final String [] line: lines) {
