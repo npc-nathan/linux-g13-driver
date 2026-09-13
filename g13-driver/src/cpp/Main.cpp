@@ -14,9 +14,16 @@
 #include <sys/wait.h> 
 #include <syslog.h> 
 
-// Headers for the tray icon functionality
+// Headers for the tray icon functionality.
+// Debian/Ubuntu >= 22.04 ship the Ayatana fork of AppIndicator under a
+// different header directory; the classic libappindicator path is kept as a
+// fallback for other distributions.
 #include <gtk/gtk.h>
+#if __has_include(<libayatana-appindicator/app-indicator.h>)
+#include <libayatana-appindicator/app-indicator.h>
+#else
 #include <libappindicator/app-indicator.h>
+#endif
 
 #include "G13.h"
 #include "Output.h"

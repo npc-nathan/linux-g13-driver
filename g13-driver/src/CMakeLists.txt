@@ -15,8 +15,14 @@ find_package(PkgConfig REQUIRED)
 
 # Find modules
 pkg_check_modules(LIBUSB REQUIRED libusb-1.0)
-pkg_check_modules(APPINDICATOR REQUIRED appindicator3-0.1)
-pkg_check_modules(GTK3 REQUIRED gtk+-3.0) 
+pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+
+# AppIndicator was forked to AyatanaAppIndicator, which is what Debian/Ubuntu
+# (>= 22.04) ship. Accept whichever of the two development packages exists.
+pkg_check_modules(APPINDICATOR appindicator3-0.1)
+if (NOT APPINDICATOR_FOUND)
+    pkg_check_modules(APPINDICATOR REQUIRED ayatana-appindicator3-0.1)
+endif()
 
 # Add include directories
 include_directories(
