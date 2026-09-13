@@ -259,6 +259,24 @@ The daemon publishes what it is drawing to `$XDG_RUNTIME_DIR/g13-screen` and the
 values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool's preview shows
 the real screen and how the applet designer previews against live data.
 
+### The config tool's screen window
+
+The **Screen…** button next to the profile selector opens it:
+
+- a **live preview** of the 160x43 screen, rendered with the driver's own font, with any
+  text that lands on ink highlighted in orange - on a one-colour panel that text is
+  invisible, so it is shown as a problem rather than left as a trap;
+- the **visuals list**: add and remove, reorder, choose which one is showing, and set the
+  cycle timing;
+- **start, stop and restart** for the daemon, with its state.
+
+Everything applies as it is changed, because the daemon reads `visuals.json` and picks it
+up within a second, so there is nothing to confirm.
+
+The tool's screen model mirrors the daemon's, and a test renders the same layout on both
+sides and compares the frames byte for byte - a preview that disagrees with the panel would
+be worse than no preview at all.
+
 ## Record mode (the MR button)
 
 Press **MR** on the pad while the config tool is open:
