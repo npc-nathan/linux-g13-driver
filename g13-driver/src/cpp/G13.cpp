@@ -644,8 +644,9 @@ void G13::draw_test_pattern() {
 }
 
 void G13::write_char(int x, int y, char c) {
-    // (Existing implementation)
-    if (c < 32 || c > 127) c = 32; 
+    // The font table covers ASCII 32..125; anything outside it would read past the end
+    // of the table, so it is drawn as a space.
+    if (c < 32 || c > 125) c = 32;
     int font_index = (c - 32) * 5;
     for (int col = 0; col < 5; col++) {
         uint8_t line = font_5x7[font_index + col];

@@ -10,6 +10,7 @@ import java.util.Properties;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -284,6 +285,13 @@ public class G13 extends JPanel {
 			profileButtons[i] = button;
 			profilePanel.add(button);
 		}
+
+		// The screen is a separate window: preview, visuals and the daemon that draws them.
+		final JButton screenButton = new JButton("Screen\u2026");
+		screenButton.setToolTipText("Preview the screen, choose which visuals are shown, and control the daemon");
+		screenButton.addActionListener(e -> ScreenPanel.showWindow());
+		profilePanel.add(screenButton);
+
 		return profilePanel;
 	}
 
