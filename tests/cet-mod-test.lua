@@ -74,6 +74,44 @@ Game = {
             end,
         }
     end,
+    -- The map, with the player's own pin on it. The pin is the mappin whose variant matches
+    -- the game's CustomPositionVariant, whatever build this is.
+    GetMappinSystem = function()
+        return {
+            GetMappins = function(self, _target)
+                return {
+                    { GetVariant = function() return gamedataMappinVariant.FixerVariant end,
+                      GetWorldPosition = function() return { x = 120, y = -180, z = 8 } end,
+                      GetName = function() return "LocKey#4001" end,
+                      id = { value = 11 }, worldPosition = { x = 120, y = -180, z = 8 } },
+                    { GetVariant = function() return gamedataMappinVariant.CustomPositionVariant end,
+                      GetWorldPosition = function() return { x = 400.5, y = 199.75, z = 8 } end,
+                      GetName = function() return nil end,
+                      id = { value = 12 }, worldPosition = { x = 400.5, y = 199.75, z = 8 } },
+                }
+            end,
+        }
+    end,
+    GetScriptableSystemsContainer = function()
+        return {
+            Get = function(self, _name)
+                return { districtManager = { GetCurrentDistrict = function()
+                    return { GetDistrictID = function() return { value = "watson" } end }
+                end } }
+            end,
+        }
+    end,
+}
+
+gamedataMappinVariant = { CustomPositionVariant = "CustomPositionVariant",
+                          FixerVariant = "FixerVariant" }
+gamemappinsMappinTargetType = { Map = 1 }
+
+TweakDBInterface = {
+    GetDistrictRecord = function(_id)
+        return { LocalizedName = function() return "LocKey#9001" end,
+                 SubDistrict = { "LocKey#9002", "LocKey#9003" } }
+    end,
 }
 
 function GetLocalizedText(key)
@@ -81,6 +119,8 @@ function GetLocalizedText(key)
         ["LocKey#1234"] = "Deliver the package to Vex",
         ["LocKey#2001"] = "Rogue's request",
         ["LocKey#77"] = "Overture",
+        ["LocKey#9001"] = "Watson",
+        ["LocKey#4001"] = "Regina Jones",
     }
     return known[key] or key
 end
@@ -157,6 +197,13 @@ if state then
     check("the reserve count came through", "180", state.ammo_total)
     check("the player position came through", "100.5", state.x)
     check("heading, facing north (forward y = 1)", "0", state.heading)
+    -- The pin is 300 east and 400 north of the player: 500 units, 36 degrees off north.
+    check("the pin's bearing came through", "36", state.pin_bearing)
+    check("the pin's distance came through", "5", state.pin_distance)
+    check("the pin reads ahead when facing north", "36", state.pin_relative)
+    check("the district you are in", "Watson", state.district)
+    check("the nearest named place", "Regina Jones", state.near)
+    check("the ready-made line for the screen", "PIN 5m  Watson", state.route)
 end
 
 -- The throttle: a tenth of a second is not enough to redraw, two of them are.
@@ -178,6 +225,7 @@ truthy("a write happens once the interval is up", stamp() ~= nil)
 FORWARD = { x = 1, y = 0, z = 0 }
 handlers.onUpdate(0.2)
 check("heading, facing east (forward x = 1)", "90", read_state().heading)
+check("the pin is now 36 degrees anticlockwise of east, so 306", "306", read_state().pin_relative)
 
 -- A build that refuses the weapon calls must still produce a file: a game must never break
 -- the mod, and a missing ammo count is a blank on the screen, not a crash.

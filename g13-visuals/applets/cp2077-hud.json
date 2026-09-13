@@ -12,6 +12,11 @@
     "quest": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#quest",
     "weapon": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#weapon",
     "heading": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#heading",
+    "pin_relative": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#pin_relative",
+    "pin_distance": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#pin_distance",
+    "district": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#district",
+    "near": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#near",
+    "route": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#route",
     "handling": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#mod"
   },
   "widgets": [
@@ -23,7 +28,7 @@
 
     {"type": "line", "x": 1, "y": 27, "w": 158},
     {"type": "brackets", "x": 1, "y": 28, "w": 18, "h": 13, "len": 5, "thick": 2},
-    {"type": "arrow", "x": 10, "y": 34, "r": 6, "source": "heading"},
-    {"type": "text", "x": 23, "y": 32, "format": "HDG {heading}  {weapon}", "scroll": true, "scroll_width": 22, "scroll_speed": 2}
+    {"type": "arrow", "x": 10, "y": 34, "r": 6, "source": "pin_relative"},
+    {"type": "text", "x": 23, "y": 32, "format": "{route}", "scroll": true, "scroll_width": 22, "scroll_speed": 2}
   ]
 }

@@ -34,6 +34,9 @@ documentation:
 | `objective`, `quest`, `objective_id`, `quest_id` | `Game.GetJournalManager():GetTrackedEntry()` then two `GetParentEntry()` steps | verified in use |
 | `weapon` | the active weapon's `GetName()` loc key through `GetLocalizedText` | verified in use |
 | `x`, `y`, `z`, `heading` | `GetWorldPosition()`, `GetWorldForward()` | verified in use |
+| `district` | `PreventionSystem.districtManager:GetCurrentDistrict()` → its TweakDB record's `LocalizedName()` | pattern verified in use |
+| `near` | the nearest map mappin that has a name | pattern verified in use |
+| `pin_bearing`, `pin_distance`, `pin_relative`, `route` | `GetMappinSystem():GetMappins(Map)`, the mappin whose variant is `CustomPositionVariant` | **probed**: see `G13Probe()` |
 | `ammo`, `ammo_total`, `ammo_max` | the weapon's magazine/ammo calls | **probed**: whichever the build answers |
 
 Anything that cannot be read is simply absent from the file — a game build that refuses a call
@@ -54,11 +57,20 @@ one line to wire in.
 
 ## What is not there yet
 
-- **No turn-by-turn arrow.** The heading arrow is the direction you are facing, from
-  `GetWorldForward()`. A bearing to the tracked waypoint needs the waypoint's world position,
-  and the call that reads it has not been found — the mappin system's setter is visible in other
-  mods, not a getter. `G13Probe()` checks `GetMappinPath` and `GetPosition` on the tracked entry
-  for exactly this.
+- **No turn-by-turn.** The game's own route is not readable anywhere found, so there is no next
+  corner and no road to follow on the screen. What there is instead: **an arrow to your map
+  pin** — the game's own custom-position mappin — with the distance, and it points relative to
+  which way you are facing, so straight up means straight ahead.
+- **Street names are not available.** The district you are standing in is (`district`, from the
+  PreventionSystem), and the nearest named place (`near`), but nothing found returns a street
+  name. `G13Probe()` lists every mappin variant on your map with its distance, so if a street
+  layer exists in your build it will show up there.
+- **The distance to a pin is a straight line**, and assumes 100 world units to the metre. Drive a
+  known distance once with the pin set; if the number is out by a factor, it is one constant
+  (`PIN_UNITS_PER_METRE`).
+- **The pin variant is matched by name** (`CustomPosition`) as well as by identity, because enum
+  tables differ between builds. If no pin is found, `G13Probe()` prints the variants present and
+  the name is one line to add.
 - **The heading convention is worth a glance in game.** It is written as 0° = north, 90° = east.
   If it reads backwards, it is one line in `init.lua`.
 - **`objective` is only the current phase's text.** Sub-objectives and the "N/M" counters some
@@ -76,9 +88,16 @@ reader never sees half of it):
   "objective": "Deliver the package to Vex", "objective_id": "q005_rogue_obj_2",
   "quest": "Rogue's request", "quest_id": "q005_rogue",
   "weapon": "Overture", "ammo": 24, "ammo_total": 180, "ammo_max": 24,
-  "x": 100.5, "y": -200.25, "z": 8.0, "heading": 137
+  "x": 100.5, "y": -200.25, "z": 8.0, "heading": 137,
+  "district": "Watson", "near": "Megabuilding H10",
+  "pin_bearing": 42, "pin_distance": 240, "pin_distance_raw": 24013,
+  "pin_relative": 265, "route": "PIN 240m  Watson"
 }
 ```
+
+`route` is one line already made up for a small screen: the pin and its distance when there is
+one, otherwise the district and the nearest named place — so an applet does not have to choose
+between fields it cannot test for itself.
 
 Any program may read it, and any game that can write a file like it can drive the same applet —
 `json:<path>#<field>` is all the Linux side needs.

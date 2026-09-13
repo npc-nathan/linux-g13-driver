@@ -314,11 +314,13 @@ scrolling along, and a compass arrow. On the pad, tap the round button until it 
 CITY**, or pick it in the Screen window and press **Show now**. Its own `README.md` lists every
 field and how sure each one is.
 
-Two deliberate gaps: there is **no turn-by-turn arrow yet** (nothing found reads the tracked
-waypoint's world position, so the arrow is the direction you are facing, from
-`GetWorldForward()`), and **ammo is probed, not known**, because builds differ in what they
-answer. `G13Probe()` in the CET console prints what yours allows; every uncertain call is guarded,
-so a build that refuses one leaves a blank rather than an error.
+Two deliberate gaps: there is **no turn-by-turn** (the game's own route is not readable), and
+**ammo is probed, not known**, because builds differ in what they answer. What there is instead
+of turn-by-turn: an **arrow to your map pin** with the distance, pointing relative to which way
+you are facing, plus the **district** you are in and the nearest named place. Street names are
+not available anywhere found. `G13Probe()` in the CET console prints what your build allows —
+including every map mappin variant with its distance, which is how the pin is identified — and
+every uncertain call is guarded, so a build that refuses one leaves a blank rather than an error.
 
 **Which framework?** CET (Lua) is the only practical way to get live state out of a running
 Cyberpunk 2077 — it can write files, and REDscript cannot. REDscript is also Cyberpunk-only (its
