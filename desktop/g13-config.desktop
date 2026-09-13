@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=G13 Configuration
+Comment=Keys, profiles, and the screen with its applets
+Exec=@BINDIR@/g13-gui
+Icon=input-gaming
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=G13;Logitech;keypad;

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G13 Start Driver
+Comment=Start the pad: keys, profiles and the LCD
+Exec=@BINDIR@/g13-service start driver
+Icon=media-playback-start
+Terminal=false
+Categories=Utility;HardwareSettings;

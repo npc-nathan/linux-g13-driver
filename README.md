@@ -5,9 +5,24 @@ The original project is over 10 years old. This fork has been refactored to use 
 
 ## Features
 
-* **Modern C++ Driver:** The core driver has been updated for better performance and compatibility.
-* **Java GUI:** The configuration utility is built with Java 17 and Maven, ensuring it runs on modern systems.
-* **Flexible Configuration:** Offers multiple ways to configure your G13: via the user-friendly GUI, manual file editing, or using the driver's fixed mapping with external tools.
+* **The pad works as a pad.** Profiles with M1/M2/M3, the buttons and the joystick, macros,
+  pass-through keys, and a working MR record button — with the profile bug of the upstream
+  driver fixed (the M buttons are report bits 29-32, not 25-28).
+* **A real screen.** The LCD is a 160x43 display anything can draw on: text, frames, bars and
+  applets, driven by `g13-lcd` or by writing the driver's pipe directly.
+* **A screen that does something by itself.** `g13-visuals` draws live visuals — clock,
+  system, media, pad state, your own applets — with the four buttons beside the screen
+  choosing and navigating (`g24`: tap for the next one, hold for the menu; L1-L4: back, up,
+  down, select).
+* **Applets in JSON.** A screen can be described rather than programmed: widgets bound to
+  data sources, live values, and the config tool previews it against real data.
+* **The Logitech LCD SDK, on Linux.** The functions games and applets call on Windows
+  (`LogiLcdInit`, `LogiLcdMonoSetText`, ...) implemented here, including a PE
+  `LogitechLcd.dll` for games running under Wine/Proton, with `g13-lcd-bridge` relaying.
+* **A Java configuration tool.** Java 17 and Maven, with keys, profiles, macros, and a Screen
+  window that shows what the panel is showing.
+* **Helpers you can script.** `g13-lcd`, `g13-watch`, `g13-keywatch`, `g13-buttons`,
+  `g13-service`, and a test suite covering all of it (`make test`).
 
 ## Requirements
 
@@ -15,13 +30,18 @@ The original project is over 10 years old. This fork has been refactored to use 
 
 You need to install the following packages via your package manager:
 
-* `make`
-* `cmake`
+* `make`, `cmake`, `gcc`/`g++`
 * `gtk3` / `gtk3-devel`
 * `libusb-1.0-0` (on some distros named `libusb-1.0-0-dev` or `libusb1-devel`)
 * `libappindicator-gtk3` (or `libayatana-appindicator3-dev` on Debian/Ubuntu 22.04+)
-* `Java 17` or higher
-* `python-psutil` (for the monitor script)
+* `Maven` and `Java 17` or higher (for the configuration tool)
+* `python3` (the screen tools and the tests are standard library only)
+
+Optional:
+
+* `mingw-w64` - to build the Windows `LogitechLcd.dll` for games under Wine/Proton
+  (`make build-lcdsdk-windows`)
+* `evtest` - what `g13-keywatch` runs, to see what a key actually sends
 
 ### Automated Dependency Installation
 
@@ -36,46 +56,69 @@ chmod +x install_deps.sh
 ## Build & Installation
 
 1.  Open a terminal and navigate to the project directory.
-2.  Build the driver:
+2.  Build everything:
 
     ```bash
-    make all
+    make all          # the driver, the configuration tool, and the Logitech LCD SDK
+    make test         # every test in the repository, without touching the device
     ```
-
-The installation process will clean up automatically after finishing.
 
 ## Choose your Installation Method
 
 ### Option A: System-Wide Installation (Standard)
-This is the recommended method for standard usage. It installs binaries to /usr/bin and resources to /usr/share/.
+Binaries go to `/usr/bin`, the library and header to `/usr/lib` and `/usr/include`, the menu
+entries to `/usr/share/applications`, and the user units to `/usr/lib/systemd/user`.
 
 ```bash
 sudo make install
 ```
-Note: As per standard Linux security practices, the installation does not auto-start user services. You must enable the driver for your user manually once:
+
+Nothing is started for you: a system install never touches your session. Enable the three
+user services once:
 
 ```bash
-systemctl --user enable --now g13
-systemctl --user start g13
+systemctl --user enable --now g13 g13-visuals g13-lcd-bridge
 ```
 
 #### Option B: User-Local Installation (Developer Mode)
-This method installs everything to your home directory (~/.local/bin). It is intended for development, testing, or users without root access. Automatically creates and starts the Systemd service.
+Everything goes into `~/.local` (`bin`, `lib`, `include`, `share/applications`) and the units
+into `~/.config/systemd/user`. No root, and it is what this machine uses.
 
 ```bash
-make install-user
+make install-user       # installs everything and starts the three services
+make install-udev       # once, separately: the udev rule needs sudo
 ```
-Driver: Installed to ~/.local/bin/linux-g13-driver
 
-Service: Automatically enabled and started immediately.
+`install-user` deliberately runs no `sudo`: the only step that needs root is the udev rule in
+`/etc`, and keeping it out means a reinstall never asks for a password. To bring the services
+back after a change, `make enable-services` (or `g13-service start all`).
 
-Note on Permissions: Both methods install a UDEV rule (/etc/udev/rules.d/99-g13.rules) to allow access to the G13 without sudo. You might need to unplug and replug your device once after installation if it's not detected immediately. The same rule makes the driver's virtual keyboard readable by the `plugdev` group, so `evtest` and `g13-keywatch` work without root.
+### What gets installed
 
-Checking what a binding sends: run `g13-keywatch` (installed to ~/.local/bin) and press
-keys on the pad; it prints the events the driver emits, including the M button codes
-(`688` = MR, `691`/`692`/`693` = M1/M2/M3). If it says the device is not readable, the
-udev rule is missing: `sudo cp udev/99-g13.rules /etc/udev/rules.d/` and
-`sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input`.
+| Piece | What it is |
+| --- | --- |
+| `linux-g13-driver` | the driver itself, run as `g13.service` |
+| `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen window |
+| `g13-visuals` | draws on the screen and runs the menu (`g13-visuals.service`) |
+| `g13-lcd-bridge` | relays a Windows `LogitechLcd.dll` to the driver (`g13-lcd-bridge.service`) |
+| `g13-lcd` / `g13lcd.py` | text, images and frames on the screen, as a tool or an importable module |
+| `g13-buttons` | says or sets who owns the screen and the four buttons (`auto`, `visuals`, `sdk`) |
+| `g13-service` | start, stop or restart the services, with a desktop notification |
+| `g13-keywatch` / `g13-watch` | what the pad sends / the event bus it publishes |
+| `liblogitechlcd.so`, `LogitechLcd.h` | the Logitech LCD SDK for programs here; `LogitechLcd.dll` for Windows ones |
+
+The menu entries (`G13 Configuration`, `G13 Start Driver`, `G13 Stop Driver`, `G13 Start All`,
+`G13 Stop All`) land in your applications menu.
+
+Note on permissions: the udev rule lets the driver claim the device without sudo, and makes
+the driver's own virtual keyboard readable by the `plugdev` group, so `evtest` and
+`g13-keywatch` work without root. Unplug and replug the pad once after installing it.
+
+Checking what a binding sends: run `g13-keywatch` and press keys on the pad; it prints the
+events the driver emits, including the M button codes (`688` = MR, `691`/`692`/`693` =
+M1/M2/M3). If it says the device is not readable, the udev rule is missing: `make
+install-udev`, or `sudo cp udev/99-g13.rules /etc/udev/rules.d/ && sudo udevadm control
+--reload-rules && sudo udevadm trigger --subsystem-match=input`.
 
 ## How to use the Driver and GUI
 
@@ -133,7 +176,7 @@ Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
 ## The LCD screen as a display
 
-`g13-lcd` (installed alongside the driver) writes to the screen: 160x48 pixels, one bit
+`g13-lcd` (installed alongside the driver) writes to the screen: 160x43 pixels, one bit
 each.
 
 ```sh
@@ -166,10 +209,12 @@ as `g13lcd.VISIBLE_HEIGHT`. `g13-lcd` also works as a
 module - `g13lcd.at()`, `g13lcd.frame()`, `g13lcd.pixels_to_frame()` - so a game can put
 its own stats on the screen.
 
-What this cannot do: the Windows Logitech LCD SDK and the LGS LCD applets are
-Windows-only binaries, so nothing on Linux can load them and games with built-in
-Logitech LCD support cannot be pointed at this. What is reproducible is the mechanism
-they used: an application pushes data, the driver renders it.
+The mechanism is the reproducible part: an application pushes data and the driver renders it.
+Logitech's own way of doing that - the SDK games and applets call on Windows - is implemented
+here too, including the Windows library itself for games under Wine or Proton: see
+[The Logitech LCD SDK, on Linux](#the-logitech-lcd-sdk-on-linux) below. Games that never used
+it (and have no mod support) are still out of reach; nothing on Linux can make a game draw
+somewhere it never tried to.
 
 ## The Logitech LCD SDK, on Linux
 
@@ -336,8 +381,8 @@ several: `"{day} {date} {time}"`. A worked example ships in
 `g13-visuals/applets/example-stats.json`.
 
 The daemon publishes what it is drawing to `$XDG_RUNTIME_DIR/g13-screen` and the live
-values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool's preview shows
-the real screen and how the applet designer previews against live data.
+values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool shows the real
+screen in its preview, and where anything else can read the current values from.
 
 ### The config tool's screen window
 
@@ -484,6 +529,38 @@ make uninstall
 ```
 
 (Note: This removes the binaries, UDEV rules, and service files, but keeps your configuration in ~/.config/g13 to prevent data loss.)
+
+
+## Testing
+
+Everything lives in `tests/` and runs without the device, the daemon or your configuration:
+each suite gets its own scratch directories, and the ones that need a screen endpoint use a
+regular file where the driver would have a FIFO.
+
+```bash
+make test
+```
+
+That covers the Logitech LCD SDK (the native library, and the Windows path through the
+bridge), the visuals daemon (applets, the menu, the rule that keeps text off filled pixels,
+and who owns the buttons), the tool's screen model, and a cross-check that the tool and the
+daemon render **the same pixels** - a preview that disagrees with the panel would be worse
+than no preview at all.
+
+
+## What is not done yet
+
+Stated here rather than discovered later:
+
+* **No game has driven the panel under Proton yet.** The Windows half is proven as far as it
+  can be without Wine: the library's own code path is built for Linux and tested through the
+  bridge, and the DLL's exports are checked, but a real game is untried.
+* **One SDK client at a time.** Logitech's LCD Manager rotated between applets; here two
+  programs calling `LogiLcdUpdate()` would fight over the screen.
+* **No applet designer.** Applets are JSON files you write, and the Screen window previews
+  them; there is no point-and-click designer.
+* **Mouse buttons and gamepads cannot be recorded** with MR: the driver's virtual device
+  advertises neither, so that needs driver work first.
 
 
 ## Notes

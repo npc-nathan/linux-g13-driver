@@ -1,0 +1,70 @@
+#!/bin/bash
+# Every test this repository has, in one command.
+#
+#   bash tests/run-all-tests.sh        (or: make test)
+#
+# Nothing here touches the live configuration, the running daemon, or the device: each suite
+# gets its own scratch directories, and the two that need a screen endpoint use a regular
+# file where the driver would have a FIFO. Build first - the suites are skipped with a
+# message rather than failing obscurely if the binaries are missing.
+set -u
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPTS="$REPO/g13-driver/src/scripts"
+LCDSDK="$REPO/g13-driver/src/lcdsdk"
+CLASSES="$REPO/g13-config-tool/target/classes"
+TESTS="$REPO/tests"
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/g13-tests-XXXXXX")"
+
+passed=0
+failed=0
+
+run() {
+    local name="$1"
+    shift
+    # The name is for reading; the file it logs to needs a name without spaces or slashes.
+    local slug
+    slug="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '-')"
+    printf '%-52s' "$name"
+    if "$@" > "$SCRATCH/$slug.log" 2>&1; then
+        printf 'ok\n'
+        passed=$((passed + 1))
+    else
+        printf 'FAILED\n'
+        failed=$((failed + 1))
+        tail -3 "$SCRATCH/$slug.log" | sed 's/^/      /'
+    fi
+}
+
+missing() {
+    echo "missing: $1 - build first (make all, or make build-lcdsdk build-gui)"
+    exit 2
+}
+
+[ -x "$LCDSDK/lcdsdk-selftest" ] || missing "$LCDSDK/lcdsdk-selftest"
+[ -d "$CLASSES" ] || missing "$CLASSES"
+
+if ! command -v java >/dev/null 2>&1; then
+    echo "java is needed for the tool's tests"
+    exit 2
+fi
+
+echo "Logitech LCD SDK"
+run "native library and frames" python3 "$SCRIPTS/lcdsdk-test.py"
+run "the Windows path, through the bridge" python3 "$SCRIPTS/lcdsdk-proxy-test.py"
+
+echo
+echo "The screen's visuals"
+run "applets, menu, layout rule, button mode" python3 "$TESTS/VisualsTest.py"
+
+echo
+echo "The config tool"
+run "the screen model (Lcd/LcdFont)" java -Djava.awt.headless=true \
+    -Dg13.repo="$REPO" -cp "$CLASSES:$TESTS" "$TESTS/FrameTest.java"
+run "the tool and the daemon draw the same pixels" python3 "$TESTS/frame-check.py"
+run "the screen window and the button mode" env XDG_CONFIG_HOME="$SCRATCH/config" \
+    java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" "$TESTS/ScreenPanelTest.java"
+
+echo
+echo "passed: $passed   failed: $failed   (logs: $SCRATCH)"
+[ "$failed" -eq 0 ] || exit 1

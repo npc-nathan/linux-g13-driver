@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G13 Stop Driver
+Comment=Stop the pad and release the device
+Exec=@BINDIR@/g13-service stop driver
+Icon=media-playback-stop
+Terminal=false
+Categories=Utility;HardwareSettings;

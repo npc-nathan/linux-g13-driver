@@ -1,0 +1,15 @@
+[Unit]
+Description=G13 screen bridge (Logitech LCD SDK for Windows programs)
+Documentation=https://github.com/npc-nathan/linux-g13-driver
+# Listens on 127.0.0.1 for a LogitechLcd.dll under Wine/Proton and relays to the driver.
+# It works with the driver absent (it just says so), so it does not require it to start.
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/g13-lcd-bridge
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

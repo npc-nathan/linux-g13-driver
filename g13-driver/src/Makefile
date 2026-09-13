@@ -17,6 +17,11 @@ TARGET_PATH := ../$(TARGET_NAME)
 SCRIPT_DIR  := ./scripts
 SERVICE_SRC := ./systemd/g13.service
 
+# Where the pieces go on a system install.
+LIBDIR      ?= $(PREFIX)/lib
+INCLUDEDIR  ?= $(PREFIX)/include
+APPDIR      ?= $(DATADIR)/applications
+
 # GUI Paths
 GUI_ROOT    := ../../g13-config-tool
 GUI_JAR_SRC := $(GUI_ROOT)/target/Linux-G13-GUI.jar
@@ -25,7 +30,7 @@ GUI_JAR_NAME:= Linux-G13-GUI.jar
 # Config Paths (Source)
 BINDINGS_SRC:= ../bindings/.g13
 
-.PHONY: all dependencies build-driver build-gui build-lcdsdk build-lcdsdk-windows test-lcdsdk clean install install-user uninstall
+.PHONY: all dependencies build-driver build-gui build-lcdsdk build-lcdsdk-windows test test-lcdsdk install-udev enable-services clean install install-user uninstall
 
 # =============================================================================
 # Main Workflow
@@ -67,6 +72,24 @@ build-lcdsdk-windows:
 test-lcdsdk: build-lcdsdk
 	python3 scripts/lcdsdk-test.py
 
+# Every test in the repository, with the scratch directories they need. Nothing here touches
+# the live configuration, the running daemon, or the device.
+test: build-lcdsdk build-gui
+	bash ../../tests/run-all-tests.sh
+
+# The udev rules let the driver claim the device as your user. They live in /etc, which is why
+# this is the one step needing sudo - kept out of install-user so the rest runs password-free.
+install-udev:
+	@echo "--- Installing UDEV rules (sudo required) ---"
+	sudo cp udev/99-g13.rules /etc/udev/rules.d/
+	sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# The three user services: the pad itself, what draws on its screen, and the Windows bridge.
+enable-services:
+	systemctl --user daemon-reload
+	systemctl --user enable --now g13.service g13-visuals.service g13-lcd-bridge.service
+	@echo "Enabled: g13, g13-visuals, g13-lcd-bridge"
+
 
 # =============================================================================
 # System-Wide Installation (Root / Package Manager)
@@ -96,8 +119,8 @@ install:
 	install -m 755 scripts/g13-lcd $(DESTDIR)$(BINDIR)/g13-lcd
 	install -m 755 scripts/g13-watch $(DESTDIR)$(BINDIR)/g13-watch
 	install -m 644 scripts/g13lcd.py $(DESTDIR)$(BINDIR)/g13lcd.py
-	install -m 755 ../g13-visuals/g13-visuals $(DESTDIR)$(BINDIR)/g13-visuals
-	sed 's|%h/.local/bin|$(BINDIR)|g' ../g13-visuals/systemd/g13-visuals.service > g13-visuals.service
+	install -m 755 ../../g13-visuals/g13-visuals $(DESTDIR)$(BINDIR)/g13-visuals
+	sed 's|%h/.local/bin|$(BINDIR)|g' ../../g13-visuals/systemd/g13-visuals.service > g13-visuals.service
 	install -d $(DESTDIR)$(SYSTEMDDIR)
 	install -m 644 g13-visuals.service $(DESTDIR)$(SYSTEMDDIR)/g13-visuals.service
 	rm g13-visuals.service
@@ -105,9 +128,27 @@ install:
 	# Systemd (Copy static file)
 	install -d $(DESTDIR)$(SYSTEMDDIR)
 	install -m 644 $(SERVICE_SRC) $(DESTDIR)$(SYSTEMDDIR)/g13.service
+
+	# The service manager, and the menu entries that use it
+	install -m 755 scripts/g13-service $(DESTDIR)$(BINDIR)/g13-service
+	install -m 755 scripts/g13-buttons $(DESTDIR)$(BINDIR)/g13-buttons
+	install -m 755 lcdsdk/g13-lcd-bridge $(DESTDIR)$(BINDIR)/g13-lcd-bridge
+	install -d $(DESTDIR)$(APPDIR)
+	for entry in ../../desktop/*.desktop; do \
+		sed 's|@BINDIR@|$(BINDIR)|g' "$$entry" > "$(DESTDIR)$(APPDIR)/$$(basename "$$entry")"; \
+	done
+
+	# The Logitech LCD SDK: the library, the header, and the bridge's service
+	$(MAKE) -C lcdsdk
+	install -d $(DESTDIR)$(LIBDIR) $(DESTDIR)$(INCLUDEDIR)
+	install -m 644 lcdsdk/liblogitechlcd.so $(DESTDIR)$(LIBDIR)/liblogitechlcd.so
+	install -m 644 lcdsdk/LogitechLcd.h $(DESTDIR)$(INCLUDEDIR)/LogitechLcd.h
+	sed 's|@BINDIR@|$(BINDIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service > g13-lcd-bridge.service
+	install -m 644 g13-lcd-bridge.service $(DESTDIR)$(SYSTEMDDIR)/g13-lcd-bridge.service
+	rm g13-lcd-bridge.service
 	
 	@echo "System install done."
-	@echo "To enable the service, the user must run: systemctl --user enable --now g13"
+	@echo "To enable the services, the user must run: systemctl --user enable --now g13 g13-visuals g13-lcd-bridge"
 
 # =============================================================================
 # User-Local Installation
@@ -116,6 +157,7 @@ install:
 USER_INSTALL_DIR := $(HOME)/.local/bin
 USER_CONFIG_DIR  := $(HOME)/.config/g13
 USER_SYSTEMD_DIR := $(HOME)/.config/systemd/user
+USER_APPS_DIR    := $(HOME)/.local/share/applications
 
 install-user:
 	@echo "--- Installing for Current User ($(USER)) ---"
@@ -124,7 +166,11 @@ install-user:
 	mkdir -p $(USER_SYSTEMD_DIR)
 	
 	# Copy Files
-	cp $(TARGET_PATH) $(USER_INSTALL_DIR)/linux-g13-driver
+	# A plain cp over the running binary fails with "Text file busy". Copy beside it and
+	# rename: that is atomic, and the running process keeps its old copy until the service
+	# is restarted below.
+	cp $(TARGET_PATH) $(USER_INSTALL_DIR)/linux-g13-driver.new
+	mv -f $(USER_INSTALL_DIR)/linux-g13-driver.new $(USER_INSTALL_DIR)/linux-g13-driver
 	cp $(GUI_JAR_SRC) $(USER_INSTALL_DIR)/$(GUI_JAR_NAME)
 	cp scripts/g13-keywatch $(USER_INSTALL_DIR)/g13-keywatch
 	cp scripts/g13-lcd $(USER_INSTALL_DIR)/g13-lcd
@@ -134,14 +180,30 @@ install-user:
 	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch $(USER_INSTALL_DIR)/g13-buttons
 	
 	# Screen visuals (applets and menu)
-	cp ../g13-visuals/g13-visuals $(USER_INSTALL_DIR)/g13-visuals
+	cp ../../g13-visuals/g13-visuals $(USER_INSTALL_DIR)/g13-visuals
 	chmod +x $(USER_INSTALL_DIR)/g13-visuals
 	install -d $(USER_SYSTEMD_DIR)
-	install -m 644 ../g13-visuals/systemd/g13-visuals.service $(USER_SYSTEMD_DIR)/g13-visuals.service
+	install -m 644 ../../g13-visuals/systemd/g13-visuals.service $(USER_SYSTEMD_DIR)/g13-visuals.service
 
 	# The Logitech LCD SDK: anything that calls LogitechLcd.dll finds this instead
 	$(MAKE) -C lcdsdk
 	$(MAKE) -C lcdsdk install PREFIX=$(HOME)/.local
+
+	# The Windows bridge: the relay a LogitechLcd.dll under Wine/Proton talks to, and its
+	# service, so it is there whether or not a game is being played.
+	cp lcdsdk/g13-lcd-bridge $(USER_INSTALL_DIR)/g13-lcd-bridge
+	chmod +x $(USER_INSTALL_DIR)/g13-lcd-bridge
+	install -d $(USER_SYSTEMD_DIR)
+	sed 's|@BINDIR@|$(USER_INSTALL_DIR)|g' ../../g13-visuals/systemd/g13-lcd-bridge.service > $(USER_SYSTEMD_DIR)/g13-lcd-bridge.service
+
+	# The service manager, and the menu entries that use it
+	cp scripts/g13-service $(USER_INSTALL_DIR)/g13-service
+	chmod +x $(USER_INSTALL_DIR)/g13-service
+	install -d $(USER_APPS_DIR)
+	for entry in ../../desktop/*.desktop; do \
+		sed 's|@BINDIR@|$(USER_INSTALL_DIR)|g' "$$entry" > "$(USER_APPS_DIR)/$$(basename "$$entry")"; \
+	done
+	-command -v update-desktop-database >/dev/null && update-desktop-database $(USER_APPS_DIR)
 	
 	# Wrapper
 	echo '#!/bin/sh' > $(USER_INSTALL_DIR)/g13-gui
@@ -158,20 +220,23 @@ install-user:
 	@echo "Configuring Systemd Service..."
 	sed 's|/usr/bin/linux-g13-driver|$(USER_INSTALL_DIR)/linux-g13-driver|g' $(SERVICE_SRC) > $(USER_SYSTEMD_DIR)/g13.service
 	
-	# Enable and Start
-	@echo "Enabling and Starting Service..."
+	# Enable and start all three: the pad, what draws on its screen, and the Windows bridge
+	@echo "Enabling and starting the services..."
 	systemctl --user daemon-reload
-	systemctl --user enable g13.service
+	systemctl --user enable g13.service g13-visuals.service g13-lcd-bridge.service
 	-systemctl --user restart g13.service
+	-systemctl --user restart g13-visuals.service
+	-systemctl --user restart g13-lcd-bridge.service
 	
-	# UDEV (Needs Sudo)
-	@echo "Installing UDEV rules (sudo required)..."
-	sudo cp udev/99-g13.rules /etc/udev/rules.d/
-	sudo udevadm control --reload-rules && sudo udevadm trigger
+	# UDEV rules live in /etc and need root, so they are their own target: everything else
+	# here runs as you, with no password.
+	@echo "UDEV rules are separate: run 'make install-udev' once (needs sudo)."
 	
 	@echo "====================================================="
 	@echo " Installation Complete!"
 	@echo " GUI Tool: $(USER_INSTALL_DIR)/g13-gui"
+	@echo " Services: g13, g13-visuals, g13-lcd-bridge"
+	@echo " Enable all: make enable-services  (or 'g13-service start all')"
 	@echo " Logs: journalctl --user -u g13 -f"
 	@echo "====================================================="
 

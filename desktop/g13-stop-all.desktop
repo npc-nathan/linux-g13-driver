@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G13 Stop All
+Comment=Stop the screen visuals and the Windows bridge, then the driver
+Exec=@BINDIR@/g13-service stop all
+Icon=media-playback-stop
+Terminal=false
+Categories=Utility;HardwareSettings;

@@ -1,0 +1,109 @@
+#!/bin/sh
+# Start, stop, restart or report the G13 services, and say so on the desktop.
+#
+#   g13-service [start|stop|restart|status] [driver|visuals|bridge|all]
+#
+#   driver   the pad itself: keys, profiles and the LCD          (g13.service)
+#   visuals  what draws on the screen: applets and the menu     (g13-visuals.service)
+#   bridge   lets Windows programs under Wine/Proton drive it   (g13-lcd-bridge.service)
+#   all      the three of them
+#
+# The second word defaults to "driver", so the "G13 Start Driver" / "G13 Stop Driver" menu
+# entries keep working exactly as they did.
+#
+# Everything here is a user service: no root, no password. This box has no notify-send,
+# zenity or kdialog, so notifications go straight to org.freedesktop.Notifications over the
+# session bus, and anything that produces no notification would look broken when started from
+# a menu.
+set -u
+
+ACTION="${1:-status}"
+TARGET="${2:-driver}"
+
+TITLE="G13"
+ICON="input-gaming"
+
+notify() {
+    # $1 = summary, $2 = body, $3 = urgency ("critical" or empty)
+    if command -v notify-send >/dev/null 2>&1; then
+        if [ "${3:-}" = "critical" ]; then
+            notify-send -u critical "$1" "$2"
+        else
+            notify-send "$1" "$2"
+        fi
+        return 0
+    fi
+
+    if command -v gdbus >/dev/null 2>&1; then
+        URGENCY=1
+        [ "${3:-}" = "critical" ] && URGENCY=2
+        if gdbus call --session \
+                --dest org.freedesktop.Notifications \
+                --object-path /org/freedesktop/Notifications \
+                --method org.freedesktop.Notifications.Notify \
+                "$TITLE" 0 "$ICON" "$1" "$2" "[]" "{'urgency': <byte $URGENCY>}" 8000 >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    echo "$TITLE: $1 - $2"
+}
+
+units_for() {
+    case "$1" in
+        driver)  echo "g13.service" ;;
+        visuals) echo "g13-visuals.service" ;;
+        bridge)  echo "g13-lcd-bridge.service" ;;
+        all)     echo "g13.service g13-visuals.service g13-lcd-bridge.service" ;;
+        *)       echo "" ;;
+    esac
+}
+
+usage() {
+    echo "usage: $0 [start|stop|restart|status] [driver|visuals|bridge|all]" >&2
+}
+
+UNITS="$(units_for "$TARGET")"
+if [ -z "$UNITS" ]; then
+    usage
+    exit 2
+fi
+
+case "$ACTION" in
+    start|stop|restart)
+        for unit in $UNITS; do
+            systemctl --user "$ACTION" "$unit"
+        done
+        sleep 1
+        ;;
+    status) ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac
+
+running=""
+stopped=""
+for unit in $UNITS; do
+    if systemctl --user is-active --quiet "$unit"; then
+        running="$running $unit"
+    else
+        stopped="$stopped $unit"
+    fi
+done
+
+if [ -n "$stopped" ]; then
+    FIRST_STOPPED=$(echo "$stopped" | awk '{print $1}')
+    notify "$TITLE: not running" \
+        "Stopped:$stopped - log: journalctl --user -u $FIRST_STOPPED -n 20" critical
+    exit 1
+fi
+
+if [ "$TARGET" = "driver" ] || [ "$TARGET" = "all" ]; then
+    PROFILE=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/g13/active-profile" 2>/dev/null || echo 0)
+    notify "$TITLE: running" "Binding profile ${PROFILE} (bindings-${PROFILE}.properties)."
+else
+    notify "$TITLE: running" "$TARGET is running."
+fi
+exit 0

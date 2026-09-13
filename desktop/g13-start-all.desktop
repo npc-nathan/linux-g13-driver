@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G13 Start All
+Comment=Start the driver, the screen visuals and the Windows bridge
+Exec=@BINDIR@/g13-service start all
+Icon=media-playback-start
+Terminal=false
+Categories=Utility;HardwareSettings;
