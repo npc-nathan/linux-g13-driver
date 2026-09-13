@@ -483,13 +483,20 @@ class LayoutVisual:
                 template = widget.get("format")
                 if template is None:
                     message = str(self.value_of(widget.get("source")))
-                    if widget.get("align") == "centre":
-                        x = centred(message)
                 else:
                     try:
                         message = template.format(**values)
                     except (KeyError, ValueError, IndexError):
                         message = "?"
+
+                # Alignment is computed from the text, so a design can pin a value to the
+                # right edge without knowing how wide the number will be.
+                align = widget.get("align")
+                margin = int(widget.get("margin", 3))
+                if align == "centre":
+                    x = centred(message)
+                elif align == "right":
+                    x = max(0, g13lcd.VISIBLE_WIDTH - margin - len(message) * 6)
                 screen.text(x, y, message)
 
             elif kind == "bar":
