@@ -215,6 +215,29 @@ public class KeybindPanel extends JPanel {
 	}
 
 	/**
+	 * Records a binding from outside the panel (record mode): selects the key, sets it
+	 * to pass the given Linux key code through, and saves. This is the same path the
+	 * panel's own capture field uses, so the file and the display stay in step.
+	 * @param target The key to bind.
+	 * @param linuxKeyCode The Linux event code the key should send.
+	 */
+	public void recordPassthrough(final Key target, final int linuxKeyCode) {
+		if (target == null) {
+			return;
+		}
+
+		setSelectedKey(target);
+
+		loadingData = true;
+		passthroughButton.setSelected(true);
+		passthroughCode = linuxKeyCode;
+		passthroughText.setText(JavaToLinuxKeymapping.cKeyCodeToString(linuxKeyCode));
+		loadingData = false;
+
+		saveBindings();
+	}
+
+	/**
 	 * Loads a specific binding profile into the panel.
 	 * @param propertyNum The ID of the binding profile (0-3).
 	 * @param bindings The Properties object for the profile.

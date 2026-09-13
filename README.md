@@ -132,6 +132,25 @@ would fall back to the default behaviour.
 
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
+## Record mode (the MR button)
+
+Press **MR** on the pad while the config tool is open:
+
+1. The tool comes to the front and the status line under the keybindings panel says to
+   press the pad key you want to change.
+2. Press that pad key. It is selected on the keypad, and the status asks for the key it
+   should send.
+3. Press the key on the keyboard. The binding is written and live within a second, and
+   the status line confirms it.
+4. **Esc** (or MR again) cancels at any point.
+
+The tool has to have focus to see the key you press, which is why it comes to the
+front. Pad presses reach it through the driver's event pipe at
+`$XDG_RUNTIME_DIR/g13-events`, so the driver and the tool both need to be running.
+
+Mouse buttons and gamepad inputs cannot be recorded yet: the driver's virtual device
+does not advertise those codes, so there is nothing to send.
+
 Live Reload: The driver detects changes to the **currently active** bindings
 file and reloads it within a second — no restart needed. Pressing a profile
 button re-reads it as well. Changes made to a profile you are not currently on

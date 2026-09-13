@@ -2,16 +2,21 @@ package com.booker.g13;
 
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
+import java.awt.KeyboardFocusManager;
+import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.util.Properties;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JToggleButton;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.UIManager;
 
 /**
@@ -48,6 +53,29 @@ public class G13 extends JPanel {
 	/** One toggle per profile: loads it here and activates it on the device. */
 	private final JPanel profilePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
 	private final JToggleButton[] profileButtons = new JToggleButton[Key.PROFILE_COUNT];
+
+	/** One line of feedback: what record mode is waiting for, or what was recorded. */
+	private final JLabel statusLabel = new JLabel("Ready");
+
+	/** The G13 key code the MR button reports. */
+	private static final int MR_KEY_CODE = 32;
+
+	/** How long to wait before re-reading the active profile, in milliseconds. */
+	private static final int PROFILE_POLL_MS = 1000;
+
+	/** What record mode is waiting for. */
+	private enum RecordState {
+		/** Not recording. */
+		IDLE,
+		/** Waiting for the pad key to program. */
+		PAD_KEY,
+		/** Waiting for the key on the keyboard to map it to. */
+		TARGET_KEY
+	}
+
+	private RecordState recordState = RecordState.IDLE;
+	/** The pad key chosen in record mode, while waiting for the target key. */
+	private Key recordKey;
 	
 	/**
 	 * Constructor for the main G13 panel.
@@ -83,6 +111,8 @@ public class G13 extends JPanel {
 		final JPanel topPanel = new JPanel(new BorderLayout());
 		topPanel.add(createProfilePanel(), BorderLayout.NORTH);
 		topPanel.add(keybindPanel, BorderLayout.CENTER);
+		statusLabel.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+		topPanel.add(statusLabel, BorderLayout.SOUTH);
 		rightPanel.add(topPanel, BorderLayout.NORTH);
 		rightPanel.add(macroEditorPanel, BorderLayout.CENTER);
 		add(rightPanel, BorderLayout.EAST);
@@ -96,6 +126,119 @@ public class G13 extends JPanel {
 
 		// Open on the profile the driver is actually using.
 		showProfile(Configs.loadActiveProfile());
+
+		// React to presses on the pad, which is what makes record mode possible.
+		new Events(this::onPadKey);
+
+		// Capture the key to map while record mode is waiting for it. AWT only sees
+		// keys that arrive while this application has focus, which is why record mode
+		// raises the window.
+		KeyboardFocusManager.getCurrentKeyboardFocusManager()
+				.addKeyEventDispatcher(this::captureRecordedKey);
+
+		// Follow profile changes made on the pad (M1-M3 switch on the device) while
+		// this window is open, so the panel shows the profile the pad is using.
+		new Timer(PROFILE_POLL_MS, e -> {
+			final int active = Configs.loadActiveProfile();
+			if (active != currentProfile) {
+				showProfile(active);
+			}
+		}).start();
+	}
+
+	/**
+	 * Handles a physical key change reported by the driver.
+	 * @param g13KeyCode The G13 key code.
+	 * @param pressed true for a press, false for a release.
+	 */
+	private void onPadKey(final int g13KeyCode, final boolean pressed) {
+		if (!pressed) {
+			return;
+		}
+
+		if (g13KeyCode == MR_KEY_CODE) {
+			if (recordState == RecordState.IDLE) {
+				startRecording();
+			} else {
+				cancelRecording();
+			}
+			return;
+		}
+
+		if (recordState != RecordState.PAD_KEY || Key.isMKey(g13KeyCode)) {
+			// M1-M3 already switch profile on the device, and the poll above follows
+			// it, so there is nothing to record for them.
+			return;
+		}
+
+		final Key key = Key.getKeyFor(g13KeyCode);
+		if (key == null) {
+			return;
+		}
+
+		recordKey = key;
+		keybindPanel.setSelectedKey(key);
+		recordState = RecordState.TARGET_KEY;
+		setStatus("Recording: press the key to map " + Key.profileKeyName(g13KeyCode)
+				+ " to (Esc cancels)");
+	}
+
+	/** Arms record mode: the next pad key pressed is the one being programmed. */
+	private void startRecording() {
+		recordState = RecordState.PAD_KEY;
+		recordKey = null;
+		setStatus("Recording: press the pad key to program (Esc or MR cancels)");
+		raiseWindow();
+	}
+
+	private void cancelRecording() {
+		recordState = RecordState.IDLE;
+		recordKey = null;
+		setStatus("Recording cancelled");
+	}
+
+	/** Brings this window forward: AWT cannot see a key press without focus. */
+	private void raiseWindow() {
+		final Window window = SwingUtilities.getWindowAncestor(this);
+		if (window == null) {
+			return;
+		}
+		window.setVisible(true);
+		window.toFront();
+		window.requestFocus();
+	}
+
+	/**
+	 * Captures the key record mode is waiting for.
+	 * @param event The key event.
+	 * @return true to consume the event, so it does not reach the rest of the UI.
+	 */
+	private boolean captureRecordedKey(final KeyEvent event) {
+		if (recordState != RecordState.TARGET_KEY || event.getID() != KeyEvent.KEY_RELEASED) {
+			return false;
+		}
+
+		if (event.getKeyCode() == KeyEvent.VK_ESCAPE) {
+			cancelRecording();
+			return true;
+		}
+
+		final int code = JavaToLinuxKeymapping.keyEventToCCode(event);
+		if (code <= 0) {
+			return false;
+		}
+
+		final String keyName = Key.profileKeyName(recordKey.getG13KeyCode());
+		keybindPanel.recordPassthrough(recordKey, code);
+
+		recordState = RecordState.IDLE;
+		recordKey = null;
+		setStatus("Recorded: " + keyName + " now sends " + JavaToLinuxKeymapping.cKeyCodeToString(code));
+		return true;
+	}
+
+	private void setStatus(final String text) {
+		statusLabel.setText(text);
 	}
 
 	/**
