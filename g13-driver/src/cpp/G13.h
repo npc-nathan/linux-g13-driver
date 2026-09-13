@@ -104,6 +104,24 @@ private:
     // Physical state of every key, so only changes are reported.
     std::vector<unsigned char> raw_keys;
 
+    // Event bus: a Unix socket every client can connect to. Events go out to all of
+    // them and commands come in on the same connection. A FIFO cannot do this - two
+    // readers split the stream, so a second consumer silently steals events from the
+    // first.
+    int event_socket;
+    std::string event_socket_path;
+    std::vector<int> bus_clients;
+    void init_event_socket();
+    void cleanup_event_socket();
+    void check_event_socket();
+    void broadcast_event(const std::string& line);
+
+    /**
+     * Applies one control line, from either the control pipe or the event socket.
+     * @param line e.g. "record 1".
+     */
+    void handle_control_line(const std::string& line);
+
 
 public:
     G13(libusb_device *device);

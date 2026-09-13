@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Print the G13's key events as they happen.
+
+Talks to the driver's event socket, so any number of watchers can run at once -
+unlike the older events pipe, which splits its stream between readers, meaning a
+second consumer silently steals events from the first.
+
+    g13-watch              # "G24 pressed" / "G24 released"
+    g13-watch --raw        # the protocol lines exactly as the driver sends them
+    g13-watch --press      # only presses, no releases
+"""
+import os
+import socket
+import sys
+
+# Key codes as the config tool names them, so both speak the same language.
+NAMES = {index: "G%d" % index for index in range(22)}
+NAMES.update({
+    22: "G22 (undefined bit)",
+    23: "G23 (backlight state)",
+    24: "G24 (backlight dimmer)",
+    25: "L1 (LCD menu 1)",
+    26: "L2 (LCD menu 2)",
+    27: "L3 (LCD menu 3)",
+    28: "L4 (LCD menu 4)",
+    29: "M1", 30: "M2", 31: "M3",
+    32: "MR",
+    33: "thumb left", 34: "thumb down", 35: "thumb top (stick press)",
+    36: "stick up", 37: "stick down", 38: "stick left", 39: "stick right",
+    40: "G40 (undefined)", 41: "light", 42: "light 2", 43: "misc toggle",
+})
+
+
+def socket_path():
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return os.path.join(runtime, "g13.sock")
+    return "/tmp/g13.sock"
+
+
+def main(argv):
+    raw = "--raw" in argv
+    presses_only = "--press" in argv
+
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        connection.connect(socket_path())
+    except OSError as error:
+        print("Cannot reach the driver at %s: %s" % (socket_path(), error), file=sys.stderr)
+        print("Is it running?  systemctl --user status g13.service", file=sys.stderr)
+        return 1
+
+    print("watching %s - press keys on the pad, Ctrl-C to stop." % socket_path(), flush=True)
+    pending = b""
+    while True:
+        chunk = connection.recv(4096)
+        if not chunk:
+            print("driver closed the connection", file=sys.stderr)
+            return 1
+        pending += chunk
+        while b"\n" in pending:
+            line, pending = pending.split(b"\n", 1)
+            text = line.decode(errors="replace").strip()
+            if not text:
+                continue
+            if raw:
+                print(text, flush=True)
+                continue
+            parts = text.split()
+            if len(parts) != 3 or parts[0] != "key":
+                print(text, flush=True)
+                continue
+            code = int(parts[1])
+            pressed = parts[2] != "0"
+            if presses_only and not pressed:
+                continue
+            name = NAMES.get(code, "code %d" % code)
+            print("%-28s %s" % (name, "pressed" if pressed else "released"), flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(0)

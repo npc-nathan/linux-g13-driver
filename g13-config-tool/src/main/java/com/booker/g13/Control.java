@@ -1,22 +1,24 @@
 package com.booker.g13;
 
 import java.io.IOException;
-import java.io.OutputStream;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
 /**
- * Sends commands to the driver over its control pipe.
+ * Sends commands to the driver over its event socket.
  *
  * The driver suspends binding playback while the tool is recording, so the press that
  * picks the key to program does not also fire that key's old binding.
  *
- * Writes happen on a separate thread: opening a FIFO for writing blocks until a reader
- * appears, and the Swing thread must never wait for that.
+ * Writes happen on a separate thread: connecting and writing must never block the Swing
+ * thread.
  */
 public class Control {
 
@@ -48,12 +50,12 @@ public class Control {
         }
     }
 
-    private Path fifoPath() {
+    private Path socketPath() {
         final String runtime = System.getenv("XDG_RUNTIME_DIR");
         if (runtime != null && !runtime.isBlank()) {
-            return Paths.get(runtime, "g13-ctl");
+            return Paths.get(runtime, "g13.sock");
         }
-        return Paths.get("/tmp", "g13-ctl");
+        return Paths.get("/tmp", "g13.sock");
     }
 
     private void writeLoop() {
@@ -65,12 +67,12 @@ public class Control {
                 return;
             }
 
-            try (OutputStream out = Files.newOutputStream(fifoPath())) {
-                out.write((command + "\n").getBytes(StandardCharsets.UTF_8));
-                out.flush();
+            try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+                channel.connect(UnixDomainSocketAddress.of(socketPath()));
+                channel.write(ByteBuffer.wrap((command + "\n").getBytes(StandardCharsets.UTF_8)));
             } catch (IOException e) {
-                // Driver not running, or it restarted and recreated the pipe. The next
-                // command tries again; the driver's own timeout covers the gap.
+                // Driver not running, or it restarted. The next command tries again, and
+                // the driver's own timeout covers the gap.
             }
         }
     }

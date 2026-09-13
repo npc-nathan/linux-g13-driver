@@ -16,6 +16,9 @@
 #include <istream>
 #include <chrono> 
 #include <syslog.h> 
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <cerrno>
 
 #include "Constants.h"
 #include "G13.h"
@@ -67,6 +70,7 @@ G13::G13(libusb_device *device) {
     event_fifo_fd = -1;
     ctl_fifo_fd = -1;
     recording = false;
+    event_socket = -1;
     mkey_binding.assign(G13_NUM_KEYS, -1);
     mbutton_down.assign(G13_NUM_KEYS, -1);
     for (int i = 0; i < G13_NUM_M_KEYS; i++) {
@@ -102,12 +106,14 @@ G13::G13(libusb_device *device) {
     init_fifo();
     init_event_fifo();
     init_ctl_fifo();
+    init_event_socket();
 }
 
 G13::~G13() {
     cleanup_fifo(); 
     cleanup_event_fifo();
     cleanup_ctl_fifo();
+    cleanup_event_socket();
     if (!this->loaded) return;
     libusb_release_interface(this->handle, 0);
     libusb_close(this->handle);
@@ -126,6 +132,7 @@ void G13::start() {
         check_for_config_update();
         check_fifo();
         check_ctl_fifo();
+        check_event_socket();
 
         if (read() == -4) {
             break; 
@@ -522,20 +529,15 @@ void G13::parse_key(int key, unsigned char *byte) {
         break;
     }
 
-    // Legacy: before the M buttons were wired up, the display buttons (L1-L4,
-    // bits 25-28) selected the profiles. L1-L3 keep working as aliases so existing
-    // setups do not regress; L4 has no profile to select any more.
+    // The display buttons (L1-L4, bits 25-28) are the LCD menu buttons - the kernel
+    // calls them KEY_KBD_LCD_MENU1..4 - so they belong to whatever drives the screen.
+    // They used to switch profiles as an alias; that is gone, which leaves them free
+    // for the menu.
     case G13_KEY_L1:
     case G13_KEY_L2:
     case G13_KEY_L3:
-        if (!explicit_bindings[key] && pressed) {
-            selectProfile(key - G13_KEY_L1);
-            return;
-        }
-        break;
-
     case G13_KEY_L4:
-        return;
+        break;
 
     // Stick directions are handled by parse_joystick().
     case 36: case 37: case 38: case 39:
@@ -786,13 +788,7 @@ void G13::check_ctl_fifo() {
             std::string line;
 
             while (std::getline(ss, line)) {
-                if (line.rfind("record", 0) != 0) continue;
-
-                std::stringstream args(line);
-                std::string command;
-                int on = 0;
-                args >> command >> on;
-                setRecording(on != 0);
+                if (!line.empty()) handle_control_line(line);
             }
         }
     }
@@ -800,6 +796,148 @@ void G13::check_ctl_fifo() {
     if (recording && std::chrono::steady_clock::now() > record_until) {
         recording = false;
         syslog(LOG_INFO, "Recording stopped responding, bindings re-enabled");
+    }
+}
+
+/**
+ * @brief Creates the Unix socket clients connect to for key events.
+ *
+ * Owner-only permissions: the events are everything you type on the pad.
+ */
+void G13::init_event_socket() {
+    event_socket_path = ConfigPath::getSocketPath();
+    event_socket = -1;
+
+    unlink(event_socket_path.c_str());
+
+    event_socket = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (event_socket < 0) {
+        syslog(LOG_ERR, "Failed to create event socket: %s", strerror(errno));
+        return;
+    }
+
+    struct sockaddr_un address;
+    memset(&address, 0, sizeof(address));
+    address.sun_family = AF_UNIX;
+    if (event_socket_path.size() >= sizeof(address.sun_path)) {
+        syslog(LOG_ERR, "Event socket path is too long: %s", event_socket_path.c_str());
+        ::close(event_socket);
+        event_socket = -1;
+        return;
+    }
+    strncpy(address.sun_path, event_socket_path.c_str(), sizeof(address.sun_path) - 1);
+
+    if (bind(event_socket, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        syslog(LOG_ERR, "Failed to bind event socket %s: %s", event_socket_path.c_str(), strerror(errno));
+        ::close(event_socket);
+        event_socket = -1;
+        return;
+    }
+
+    chmod(event_socket_path.c_str(), S_IRUSR | S_IWUSR);
+
+    if (listen(event_socket, 8) != 0) {
+        syslog(LOG_ERR, "Failed to listen on event socket: %s", strerror(errno));
+        ::close(event_socket);
+        event_socket = -1;
+        return;
+    }
+
+    fcntl(event_socket, F_SETFL, fcntl(event_socket, F_GETFL, 0) | O_NONBLOCK);
+    syslog(LOG_INFO, "Event socket created at %s", event_socket_path.c_str());
+}
+
+void G13::cleanup_event_socket() {
+    for (int client : bus_clients) {
+        ::close(client);
+    }
+    bus_clients.clear();
+
+    if (event_socket >= 0) {
+        ::close(event_socket);
+        event_socket = -1;
+    }
+    if (!event_socket_path.empty()) {
+        unlink(event_socket_path.c_str());
+    }
+}
+
+/**
+ * @brief Accepts new clients and reads their commands.
+ *
+ * Reading is what detects a client going away: recv() returns 0 on a clean close.
+ */
+void G13::check_event_socket() {
+    if (event_socket < 0) return;
+
+    while (true) {
+        int client = accept(event_socket, nullptr, nullptr);
+        if (client < 0) break; // No more clients waiting.
+
+        fcntl(client, F_SETFL, fcntl(client, F_GETFL, 0) | O_NONBLOCK);
+        bus_clients.push_back(client);
+        syslog(LOG_INFO, "Event client connected (%zu total)", bus_clients.size());
+    }
+
+    char buffer[1024];
+    for (size_t i = 0; i < bus_clients.size();) {
+        const int client = bus_clients[i];
+        const ssize_t bytesRead = recv(client, buffer, sizeof(buffer) - 1, 0);
+
+        if (bytesRead == 0) {
+            ::close(client);
+            bus_clients.erase(bus_clients.begin() + i);
+            syslog(LOG_INFO, "Event client disconnected (%zu left)", bus_clients.size());
+            continue;
+        }
+
+        if (bytesRead > 0) {
+            buffer[bytesRead] = '\0';
+            std::stringstream ss(buffer);
+            std::string line;
+            while (std::getline(ss, line)) {
+                if (!line.empty()) handle_control_line(line);
+            }
+        }
+
+        i++;
+    }
+}
+
+/**
+ * @brief Sends one line to every connected client.
+ *
+ * Clients that have gone away are dropped here rather than in the caller, and
+ * MSG_NOSIGNAL keeps a vanished client from killing the driver.
+ */
+void G13::broadcast_event(const std::string& line) {
+    if (bus_clients.empty()) return;
+
+    const std::string payload = line + "\n";
+    for (size_t i = 0; i < bus_clients.size();) {
+        const ssize_t sent = send(bus_clients[i], payload.c_str(), payload.size(),
+                                  MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            ::close(bus_clients[i]);
+            bus_clients.erase(bus_clients.begin() + i);
+            continue;
+        }
+        i++;
+    }
+}
+
+/**
+ * @brief Applies one control line, from the control pipe or the event socket.
+ * @param line e.g. "record 1".
+ */
+void G13::handle_control_line(const std::string& line) {
+    std::stringstream args(line);
+    std::string command;
+    int value = 0;
+    args >> command >> value;
+
+    if (command == "record") {
+        setRecording(value != 0);
     }
 }
 
@@ -848,11 +986,14 @@ void G13::releaseAllActions() {
  * @param pressed 1 for a press, 0 for a release.
  */
 void G13::write_event(int key, int pressed) {
-    if (event_fifo_fd < 0) return;
-
     char line[32];
     int len = snprintf(line, sizeof(line), "key %d %d\n", key, pressed ? 1 : 0);
     if (len <= 0) return;
+
+    // Every client on the socket sees it.
+    broadcast_event(std::string(line, len - 1)); // Without the newline; send adds it.
+
+    if (event_fifo_fd < 0) return;
 
     ssize_t written = ::write(event_fifo_fd, line, len);
     if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {

@@ -1,20 +1,26 @@
 package com.booker.g13;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import javax.swing.SwingUtilities;
 
 /**
- * Reads the key press pipe the driver publishes, so the panel can react to presses
- * on the physical pad.
+ * Reads the key events the driver publishes, so the panel can react to presses on the
+ * physical pad.
  *
- * The driver writes one line per physical key change to
- * {@code $XDG_RUNTIME_DIR/g13-events}: {@code key <code> <0|1>}. Nothing is read
- * while the driver is not running; the reader waits and reopens the pipe when it
- * comes back.
+ * Events come from the driver's Unix socket ({@code $XDG_RUNTIME_DIR/g13.sock}), one
+ * line per physical key change: {@code key <code> <0|1>}. A socket rather than a pipe
+ * because several programs need these events at once - a pipe splits its stream between
+ * readers, so a second consumer silently steals half of them. Nothing is read while the
+ * driver is not running; the reader waits and reconnects when it comes back.
  */
 public class Events {
 
@@ -51,25 +57,46 @@ public class Events {
         running = false;
     }
 
-    private Path fifoPath() {
+    private Path socketPath() {
         final String runtime = System.getenv("XDG_RUNTIME_DIR");
         if (runtime != null && !runtime.isBlank()) {
-            return Paths.get(runtime, "g13-events");
+            return Paths.get(runtime, "g13.sock");
         }
-        return Paths.get("/tmp", "g13-events");
+        return Paths.get("/tmp", "g13.sock");
     }
 
     private void readLoop() {
         while (running) {
-            // Opened read-write so it never blocks waiting for the driver: a FIFO
-            // opened for reading only waits for a writer to appear.
-            try (RandomAccessFile pipe = new RandomAccessFile(fifoPath().toFile(), "rw")) {
-                String line;
-                while (running && (line = pipe.readLine()) != null) {
-                    handle(line);
+            // A blocking channel: read() waits for the next event, and returns -1 when
+            // the driver goes away, which is what sends us round to reconnect.
+            try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+                channel.connect(UnixDomainSocketAddress.of(socketPath()));
+
+                final ByteBuffer buffer = ByteBuffer.allocate(4096);
+                final StringBuilder pending = new StringBuilder();
+
+                while (running) {
+                    buffer.clear();
+                    final int read = channel.read(buffer);
+                    if (read < 0) {
+                        break;
+                    }
+                    if (read == 0) {
+                        continue;
+                    }
+
+                    buffer.flip();
+                    pending.append(StandardCharsets.UTF_8.decode(buffer));
+
+                    int newline;
+                    while ((newline = pending.indexOf("\n")) >= 0) {
+                        final String line = pending.substring(0, newline);
+                        pending.delete(0, newline + 1);
+                        handle(line);
+                    }
                 }
             } catch (IOException e) {
-                // Driver not running yet, or it restarted and recreated the pipe.
+                // Driver not running yet, or it restarted and recreated the socket.
             }
 
             try {

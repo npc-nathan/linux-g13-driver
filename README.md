@@ -149,6 +149,21 @@ Anything that can write to a file can drive the screen: the driver reads
 clears the screen and each following line goes below the last), and lines starting with
 `#` are commands:
 
+## The event bus
+
+Pad presses are published on a Unix socket, `$XDG_RUNTIME_DIR/g13.sock`, owner-only:
+
+```
+key 32 1        # MR pressed
+key 32 0        # MR released
+```
+
+Any number of programs can connect and all of them see every event. That is why this is a
+socket and not the older `g13-events` pipe, which still works: a pipe splits its stream
+between readers, so a second consumer silently steals events from the first. Commands go
+the other way on the same connection - `record 1` / `record 0` - and `g13-watch` prints
+events with their key names (`g13-watch --press` for presses only).
+
 | Command | Effect |
 | --- | --- |
 | `#clear` | blank the screen |

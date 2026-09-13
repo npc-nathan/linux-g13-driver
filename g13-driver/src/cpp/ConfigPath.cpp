@@ -90,3 +90,11 @@ std::string ConfigPath::getControlFifoPath() {
     }
     return "/tmp/g13-ctl";
 }
+
+std::string ConfigPath::getSocketPath() {
+    const char* xdgRuntime = getenv("XDG_RUNTIME_DIR");
+    if (xdgRuntime && *xdgRuntime) {
+        return std::string(xdgRuntime) + "/g13.sock";
+    }
+    return "/tmp/g13.sock";
+}

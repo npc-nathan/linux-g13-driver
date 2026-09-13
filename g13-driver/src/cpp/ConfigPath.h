@@ -52,6 +52,12 @@ public:
     static std::string getControlFifoPath();
 
     /**
+     * @brief Gets the path of the event socket, which any number of clients may read.
+     * @return Path to the socket (e.g. /run/user/1000/g13.sock).
+     */
+    static std::string getSocketPath();
+
+    /**
      * @brief Ensures that the configuration directory exists.
      * Creates it if it is missing.
      */
