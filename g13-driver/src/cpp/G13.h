@@ -33,6 +33,18 @@ private:
     // assigned by the profile send that binding instead of switching profile.
     std::vector<unsigned char> explicit_bindings;
 
+    // The "mk" index each key is bound to, or -1 when it is not bound to an M key
+    // code. Set by the active profile.
+    std::vector<int> mkey_binding;
+
+    // Reporters used to send the M button codes. They live outside the profile so a
+    // profile reload cannot swallow the release of a press they started.
+    std::unique_ptr<G13Action> mbutton_reporter[G13_NUM_M_KEYS];
+
+    // The "mk" index a key's press reported, or -1. Physical state, not config, so
+    // it survives profile reloads.
+    std::vector<int> mbutton_down;
+
     unsigned char lcd_buffer[G13_LCD_BUFFER_SIZE];
 
     // Feature: Live-Reload

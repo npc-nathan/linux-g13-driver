@@ -294,7 +294,10 @@ public class ImageMap extends JLabel {
                         ? "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"
                         : "macro record (KEY_MACRO_RECORD_START)"},
                 {disabled ? "Disabled in this profile"
-                        : (bound ? "Sends: " + mapped
+                        : (bound ? (profileButton && mapped.startsWith("M Key")
+                                        ? "Switches profile, sends: " + mapped
+                                        : (profileButton ? "Sends: " + mapped + " (no switch)"
+                                                : "Sends: " + mapped))
                                 : (profileButton ? "Switches to this profile (default)"
                                         : "Sends the macro record event (default)")), ""},
             };

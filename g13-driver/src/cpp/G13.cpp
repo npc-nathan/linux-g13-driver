@@ -63,6 +63,11 @@ G13::G13(libusb_device *device) {
         actions[i] = std::make_unique<G13Action>();
     }
     explicit_bindings.assign(G13_NUM_KEYS, 0);
+    mkey_binding.assign(G13_NUM_KEYS, -1);
+    mbutton_down.assign(G13_NUM_KEYS, -1);
+    for (int i = 0; i < G13_NUM_M_KEYS; i++) {
+        mbutton_reporter[i] = std::make_unique<PassThroughAction>(mkeyCodeFor(i));
+    }
 
     if (libusb_open(device, &handle) != 0) {
         syslog(LOG_ERR, "Error opening G13 device");
@@ -269,6 +274,7 @@ void G13::parse_bindings_from_stream(std::istream& stream) {
                     if (index >= 0 && index < G13_NUM_M_KEYS && gKey >= 0 && gKey < G13_NUM_KEYS) {
                         actions[gKey] = std::make_unique<PassThroughAction>(mkeyCodeFor(index));
                         explicit_bindings[gKey] = 1;
+                        mkey_binding[gKey] = index;
                     }
                 }
                 else if (type == "x") {
@@ -309,6 +315,7 @@ void G13::resetActions() {
         }
         actions[i] = std::make_unique<G13Action>();
         explicit_bindings[i] = 0;
+        mkey_binding[i] = -1;
     }
 
     // MR is the macro record button, so unless the profile binds it, it sends the
@@ -458,21 +465,44 @@ void G13::parse_key(int key, unsigned char *byte) {
     int pressed = actual_byte & mask;
 
     switch (key) {
-    // Profile buttons: M1, M2 and M3 sit on report bits 29-31 and select
-    // bindings-0..2. Pressing the key also re-reads the file, so it doubles as a
-    // manual reload. A profile that binds the button itself overrides the switch
-    // and sends that binding instead.
+    // The four M buttons. M1, M2 and M3 select bindings-0..2 by default, and
+    // pressing one also re-reads the file, so it doubles as a manual reload.
     case G13_KEY_M1:
     case G13_KEY_M2:
     case G13_KEY_M3:
-        if (!explicit_bindings[key] && pressed) {
-            selectProfile(key - G13_KEY_M1);
+    case G13_KEY_MR:
+    {
+        if (pressed) {
+            if (explicit_bindings[key] && mkey_binding[key] >= 0) {
+                // The profile maps this button to an M key code ("M Key event" in the
+                // config tool). That is what the button does on the device: the code is
+                // sent so applications see the press, and the profile switches to the
+                // one that code names (Macro Preset 1/2/3 -> M1/M2/M3).
+                mbutton_reporter[mkey_binding[key]]->set(1);
+                mbutton_down[key] = mkey_binding[key];
+                if (mkey_binding[key] < G13_NUM_PROFILES) {
+                    selectProfile(mkey_binding[key]);
+                }
+                return;
+            }
+            if (!explicit_bindings[key] && key != G13_KEY_MR) {
+                // Plain profile button: switch, and stay silent.
+                selectProfile(key - G13_KEY_M1);
+                return;
+            }
+            // MR, or a button the profile overrides with a pass through or a macro,
+            // falls through to its own action.
+            break;
+        }
+        // Release. Undo whatever the press started, even if the profile changed
+        // since - otherwise the emitted code would stay down for applications.
+        if (mbutton_down[key] >= 0) {
+            mbutton_reporter[mbutton_down[key]]->set(0);
+            mbutton_down[key] = -1;
             return;
         }
         break;
-
-    // MR is not a profile button: it is the macro record trigger and is handled by
-    // its default action (KEY_MACRO_RECORD_START) unless the profile binds it.
+    }
 
     // Legacy: before the M buttons were wired up, the display buttons (L1-L4,
     // bits 25-28) selected the profiles. L1-L3 keep working as aliases so existing
