@@ -113,6 +113,11 @@ Profiles: The **M1, M2, M3 and MR** buttons switch between the four binding
 profiles `bindings-0.properties` … `bindings-3.properties`. The four display
 buttons (L1-L4) still select the same profiles as aliases.
 
+Button types: a selected key can be **None**, **Pass Through**, **Macro** or
+**M Key** (one of the M button codes). The *M Buttons (this profile)* section
+chooses, per profile, whether each of M1-M4 switches profile or sends its own M
+code.
+
 Save: Changes are saved automatically to `~/.config/g13/bindings-*.properties`.
 
 Live Reload: The driver detects changes to the **currently active** bindings
@@ -142,6 +147,30 @@ If you don't want to use the GUI App, you can edit the files manually in `~/.con
     ```ini
     G20=p,k.20
     ```
+
+### Binding types
+
+| Value | Meaning |
+|-------|---------|
+| `p,k.<code>` | Pass through a single key. `<code>` is the Linux event code (see `docs/Eventcodes_for_Mapping.pdf`). |
+| `m,<macroId>,<repeats>` | Play macro `<macroId>` from `~/.config/g13/macro-<macroId>.properties`; `<repeats>` is `0` or `1`. |
+| `mk,<index>` | Send the M key code for `<index>`: `0`=M1 (`KEY_MACRO_PRESET1`), `1`=M2, `2`=M3, `3`=MR (`KEY_MACRO_RECORD_START`). |
+
+A key with no entry at all sends nothing. Removing a line takes effect within a
+second if that profile is the active one.
+
+**Overriding the M buttons:** by default M1/M2/M3/MR switch binding profiles. Bind
+one of them in a profile file and that binding wins *for as long as that profile is
+active*, e.g.:
+
+```ini
+G30=mk,1     # while this profile is active, M2 sends KEY_MACRO_PRESET2 instead of
+             # switching to bindings-1.properties
+```
+
+Handy for passing the M buttons through to games or for layering your own
+behaviour on top of the profiles. In the GUI this is the *M Buttons (this profile)*
+section, and any key can be given an M code via the *M Key* button type.
 
 ### Using the Display (scripting)
 
