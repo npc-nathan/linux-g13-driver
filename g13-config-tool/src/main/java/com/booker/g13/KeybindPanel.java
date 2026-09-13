@@ -56,6 +56,8 @@ public class KeybindPanel extends JPanel {
 	private Properties bindings; // The properties for the current binding profile.
 	private Properties[] macros; // All available macros, for the dropdown list.
 	private Key key = null; // The currently selected key being edited.
+	/** The macro the selected key is bound to; applied once the macro list is loaded. */
+	private int pendingMacroSelection = -1;
 	/** Called after a binding is saved, so the keypad view can refresh. */
 	private Runnable bindingChangeListener;
 
@@ -87,6 +89,8 @@ public class KeybindPanel extends JPanel {
 		private final JComboBox<String> codeBox = new JComboBox<>();
 		private final JPanel detail = new JPanel(new CardLayout());
 		private int capturedKeyCode = 0;
+		/** The macro this row should show; applied once the macro list is loaded. */
+		private int macroSelection = -1;
 
 		MButtonRow(final int index) {
 			this.index = index;
@@ -157,6 +161,7 @@ public class KeybindPanel extends JPanel {
 				case MODE_MACRO: {
 					final int macroNum = macroBox.getSelectedIndex();
 					if (macroNum >= 0) {
+						macroSelection = macroNum;
 						bindings.put(property(), "m," + macroNum + ",0");
 					} else {
 						bindings.remove(property());
@@ -197,7 +202,8 @@ public class KeybindPanel extends JPanel {
 							break;
 						case "m":
 							modeBox.setSelectedIndex(MODE_MACRO);
-							macroBox.setSelectedIndex(parts.length >= 2 ? Integer.parseInt(parts[1]) : 0);
+							macroSelection = parts.length >= 2 ? Integer.parseInt(parts[1]) : 0;
+							applyMacroSelection();
 							break;
 						case "mk":
 							modeBox.setSelectedIndex(MODE_M_CODE);
@@ -232,10 +238,23 @@ public class KeybindPanel extends JPanel {
 				}
 			}
 
-			if (macroBox.getItemCount() > 0) {
-				macroBox.setSelectedIndex(selected >= 0 && selected < macroBox.getItemCount() ? selected : 0);
+			if (selected >= 0) {
+				macroSelection = selected;
 			}
+			applyMacroSelection();
 			loadingData = false;
+		}
+
+		/**
+		 * Shows the macro this row is bound to. The profile is loaded before the macro
+		 * list exists, so this is called again once the list arrives.
+		 */
+		private void applyMacroSelection() {
+			if (macroBox.getItemCount() == 0) {
+				return;
+			}
+			final int index = macroSelection >= 0 && macroSelection < macroBox.getItemCount() ? macroSelection : 0;
+			macroBox.setSelectedIndex(index);
 		}
 	}
 
@@ -389,6 +408,11 @@ public class KeybindPanel extends JPanel {
 			macroSelectionBox.addItem(properties);
 		}
 
+		// A key bound to a macro may have been shown before the list existed.
+		if (pendingMacroSelection >= 0 && macroSelectionBox.getItemCount() > pendingMacroSelection) {
+			macroSelectionBox.setSelectedIndex(pendingMacroSelection);
+		}
+
 		loadingData = false;
 
 		// The M button rows are profile settings, so they are usable whether or not a
@@ -484,7 +508,10 @@ public class KeybindPanel extends JPanel {
 			} else if ("m".equals(type)) { // Macro type
 				macroButton.setSelected(true);
 				int macroNum = (parts.length >= 2) ? Integer.parseInt(parts[1]) : 0;
-				macroSelectionBox.setSelectedIndex(macroNum);
+				pendingMacroSelection = macroNum;
+				if (macroSelectionBox.getItemCount() > macroNum) {
+					macroSelectionBox.setSelectedIndex(macroNum);
+				}
 				boolean repeats = (parts.length >= 3) && (Integer.parseInt(parts[2]) != 0);
 				repeatsCheckBox.setSelected(repeats);
 			} else if ("p".equals(type)) { // Passthrough type
