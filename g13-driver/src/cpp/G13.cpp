@@ -894,7 +894,9 @@ void G13::check_fifo() {
                 y = 0;
             }
 
-            if (y + 7 > 48) continue; // No room left on a 48 pixel screen.
+            // Only the top 43 rows are on the glass, so a line that would be cut off
+            // is skipped rather than half drawn.
+            if (y + 7 > G13_LCD_VISIBLE_HEIGHT) continue;
             write_text(2, y, line);
             y += 8;
             changed = true;

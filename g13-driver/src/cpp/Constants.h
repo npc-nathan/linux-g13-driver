@@ -10,6 +10,13 @@
 #define G13_PRODUCT_ID 0xc21c   // The Product ID for the G13.
 #define G13_REPORT_SIZE 8       // Size of the input report from the G13 (in bytes).
 #define G13_LCD_BUFFER_SIZE 0x3c0 // Size of the buffer for the LCD screen.
+
+// The panel shows the top 43 rows of that buffer: it is 160x43, the same as the other
+// Logitech LCDs of this era, and anything drawn on rows 43-47 is off the glass. The
+// upstream test pattern draws its frame at rows 0 and 42 and columns 0 and 159, which
+// is where these numbers come from.
+#define G13_LCD_VISIBLE_WIDTH 160
+#define G13_LCD_VISIBLE_HEIGHT 43
 #define G13_NUM_KEYS 40         // Total number of logical keys, including stick directions.
 #define G13_NUM_PROFILES 3      // Binding profiles: M1, M2, M3. (MR is the record button.)
 #define G13_NUM_M_KEYS 4        // The four M buttons: M1, M2, M3, MR.

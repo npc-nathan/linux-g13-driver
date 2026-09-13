@@ -27,12 +27,24 @@ following line goes below the last), and lines starting with '#' as commands:
 Frame layout, should you build one by hand: byte x + (y // 8) * 160 holds the eight
 pixels of column x starting at row (y // 8) * 8, with the top row of that group in
 bit 0.
+
+The panel is 160x43: the top 43 rows of the 160x48 buffer are the visible screen, and
+rows 43-47 are off the glass, so keep content inside y 0-42 (g13lcd.VISIBLE_WIDTH /
+VISIBLE_HEIGHT). Everything else is invisible no matter how correct it looks in a frame.
 """
 import os
 import sys
 
 WIDTH = 160
 HEIGHT = 48
+
+# The panel is 160x43: the top 43 rows of the buffer are the visible screen and rows
+# 43-47 are off the glass, so content has to stay inside y 0-42 or it is simply not
+# there. (Same geometry as the other Logitech LCDs of that era, and what the upstream
+# test pattern draws its frame in.)
+VISIBLE_WIDTH = 160
+VISIBLE_HEIGHT = 43
+
 FRAME_BYTES = WIDTH * HEIGHT // 8  # 960
 
 
@@ -119,6 +131,37 @@ def _pbm_header(data):
     return values[0], values[1], position
 
 
+def blank(width=WIDTH, height=HEIGHT):
+    """A frame of rows, all blank, for composing a screen."""
+    return [[0] * width for _ in range(height)]
+
+
+def draw_rect(rows, x0, y0, x1, y1, value=1):
+    """Sets a rectangle of pixels, clipped to the frame."""
+    if not rows:
+        return
+    width = len(rows[0])
+    for y in range(max(0, y0), min(len(rows), y1)):
+        for x in range(max(0, x0), min(width, x1)):
+            rows[y][x] = value
+
+
+def draw_bar(rows, x0, y0, width, height, percent):
+    """Draws a bar: a hollow track with a fill proportional to percent.
+
+    The fill is computed from the track's interior and never leaves it, whatever
+    percent says (values outside 0-100 are clamped). This exists because doing the
+    arithmetic by hand is how a fill ends up drawn over the value text next to it.
+    """
+    percent = max(0, min(100, int(percent)))
+    draw_rect(rows, x0, y0, x0 + width, y0 + height)                # track outline
+    draw_rect(rows, x0 + 1, y0 + 1, x0 + width - 1, y0 + height - 1, 0)  # hollow it
+    interior = max(0, width - 2)
+    filled = interior * percent // 100
+    if filled:
+        draw_rect(rows, x0 + 1, y0 + 1, x0 + 1 + filled, y0 + height - 1)
+
+
 def read_pbm(path):
     """Reads a PBM (P1 text or P4 binary) into rows of 0/1. 1 means "pixel on"."""
     with open(path, "rb") as handle:
@@ -147,8 +190,8 @@ def read_pbm(path):
     raise ValueError("%s is not a PBM (P1 or P4) file" % path)
 
 
-def fit(rows, width=WIDTH, height=HEIGHT):
-    """Scales rows to fit the screen, keeping the shape, and centres them."""
+def fit(rows, width=VISIBLE_WIDTH, height=VISIBLE_HEIGHT):
+    """Scales rows to fit the visible part of the screen, keeping the shape, centred."""
     source_height = len(rows)
     source_width = max((len(row) for row in rows), default=0)
     if not source_width or not source_height:

@@ -158,7 +158,11 @@ clears the screen and each following line goes below the last), and lines starti
 Everything read in one go is painted as a single frame, so a screen built from several
 lines does not flicker. Frames are 160x48, one bit per pixel, stored as vertical bytes:
 byte `x + (y / 8) * 160` holds the eight pixels of column `x` starting at row
-`(y / 8) * 8`, with the lowest row of that group in bit 0. `g13-lcd` also works as a
+`(y / 8) * 8`, with the lowest row of that group in bit 0. **The panel is 160x43**: the top
+43 rows of that 48-row buffer are the visible screen, so keep content inside y 0-42 or it
+is off the glass (rows 43-47 are invisible, and text lines that would be cut off are
+skipped rather than half drawn). `g13-lcd` fits images to the visible area and exposes it
+as `g13lcd.VISIBLE_HEIGHT`. `g13-lcd` also works as a
 module - `g13lcd.at()`, `g13lcd.frame()`, `g13lcd.pixels_to_frame()` - so a game can put
 its own stats on the screen.
 
