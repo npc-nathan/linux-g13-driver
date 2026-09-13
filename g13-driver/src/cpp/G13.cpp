@@ -208,6 +208,9 @@ void G13::selectProfile(int profile) {
     bindings = profile;
     storeProfile(profile);
     loadBindings();
+
+    // Screens that show the active profile follow it from here.
+    broadcast_event("state profile " + std::to_string(profile));
 }
 
 std::unique_ptr<Macro> G13::loadMacro(int num) {
@@ -796,6 +799,7 @@ void G13::check_ctl_fifo() {
     if (recording && std::chrono::steady_clock::now() > record_until) {
         recording = false;
         syslog(LOG_INFO, "Recording stopped responding, bindings re-enabled");
+        broadcast_event("state recording 0");
     }
 }
 
@@ -960,6 +964,9 @@ void G13::setRecording(bool on) {
     } else {
         syslog(LOG_INFO, "Recording finished: bindings resumed");
     }
+
+    // Anyone watching the screen wants to know, e.g. to show "RECORDING".
+    broadcast_event(std::string("state recording ") + (recording ? "1" : "0"));
 }
 
 /** Releases everything the pad is currently holding. */

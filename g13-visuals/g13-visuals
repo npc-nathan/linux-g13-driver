@@ -1,0 +1,537 @@
+#!/usr/bin/env python3
+"""g13-visuals - the G13's screen: a set of visuals and a menu to choose between them.
+
+The screen is 160x43 pixels of one colour, so each visual lays itself out with a border,
+a title and content, using the drawing helpers in g13lcd.
+
+Buttons, all on the device:
+
+    G24 (round button left of the screen)   short press: next visual
+                                            long press:  open the menu
+    L1                                      back (closes the menu)
+    L2 / L3                                 up / down
+    L4                                      select
+
+The menu is vertical: the selection is the row with a box drawn around it.
+
+Configuration lives in $XDG_CONFIG_HOME/g13/visuals.json - which visuals are enabled, the
+order, which one is showing, and whether they cycle on a timer. The config tool edits that
+file; this daemon picks the change up within a second, so nothing here needs to be
+restarted.
+
+Visuals:
+    clock    time and date
+    system   cpu, memory, load, uptime
+    media    whatever playerctl reports
+    pad      active profile and the last few button presses
+    custom   five lines from $XDG_CONFIG_HOME/g13/screen.txt
+"""
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import g13lcd
+
+# --- device buttons ---
+MENU_BUTTON = 24        # G24, the round button left of the screen
+BUTTON_BACK = 25        # L1
+BUTTON_UP = 26          # L2
+BUTTON_DOWN = 27        # L3
+BUTTON_SELECT = 28      # L4
+
+LONG_PRESS_SECONDS = 0.6
+CONFIG_POLL_SECONDS = 1.0
+RECONNECT_SECONDS = 2.0
+
+KEY_NAMES = {index: "G%d" % index for index in range(22)}
+KEY_NAMES.update({
+    24: "G24", 25: "L1", 26: "L2", 27: "L3", 28: "L4",
+    29: "M1", 30: "M2", 31: "M3", 32: "MR",
+    33: "THUMB-L", 34: "THUMB-D", 35: "THUMB-T",
+    36: "STICK-UP", 37: "STICK-DOWN", 38: "STICK-LEFT", 39: "STICK-RIGHT",
+    41: "LIGHT",
+})
+
+
+def config_dir():
+    """The driver's config directory, honouring XDG_CONFIG_HOME."""
+    base = os.environ.get("XDG_CONFIG_HOME")
+    if base:
+        return Path(base) / "g13"
+    return Path(os.path.expanduser("~")) / ".config" / "g13"
+
+
+def socket_path():
+    """The driver's event socket."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / "g13.sock"
+    return Path("/tmp") / "g13.sock"
+
+
+class Screen:
+    """One 160x43 screen: pixels plus text drawn on top of them.
+
+    Text cannot be drawn over filled pixels - the screen has one colour of ink - so the
+    layout keeps text on blank areas and this class is just a description of what goes
+    where. It becomes the driver's line protocol with lines().
+    """
+
+    def __init__(self):
+        self.rows = g13lcd.blank()
+        self.texts = []
+
+    def text(self, x, y, message):
+        self.texts.append((int(x), int(y), str(message)))
+
+    def rect(self, x0, y0, x1, y1, value=1):
+        g13lcd.draw_rect(self.rows, x0, y0, x1, y1, value)
+
+    def bar(self, x, y, width, height, percent):
+        g13lcd.draw_bar(self.rows, x, y, width, height, percent)
+
+    def frame_and_title(self, title):
+        """The house style: a border, a title, and a rule under it."""
+        width, height = g13lcd.VISIBLE_WIDTH, g13lcd.VISIBLE_HEIGHT
+        self.rect(0, 0, width, 1)
+        self.rect(0, height - 1, width, height)
+        self.rect(0, 0, 1, height)
+        self.rect(width - 1, 0, width, height)
+        self.rect(1, 9, width - 1, 10)
+        self.text(3, 2, title)
+
+    def lines(self):
+        lines = ["#bitmap " + g13lcd.pixels_to_frame(self.rows).hex()]
+        for x, y, message in self.texts:
+            lines.append("#text %d %d %s" % (x, y, message))
+        return lines
+
+
+def centred(message, width=None):
+    """Left padding that centres a string on the screen."""
+    width = width or g13lcd.VISIBLE_WIDTH
+    return max(0, (width - len(message) * 6) // 2)
+
+
+class ClockVisual:
+    name = "clock"
+    title = "CLOCK"
+    interval = 1.0
+
+    def render(self, screen, context):
+        now = datetime.now()
+        screen.frame_and_title(self.title)
+        screen.text(centred(now.strftime("%H:%M:%S")), 17, now.strftime("%H:%M:%S"))
+        screen.text(centred(now.strftime("%a %d %b %Y")), 29, now.strftime("%a %d %b %Y"))
+
+
+class SystemVisual:
+    name = "system"
+    title = "SYSTEM"
+    interval = 2.0
+
+    def __init__(self):
+        self.previous = None
+
+    def cpu_percent(self):
+        """Busy share of the cpu since the last look."""
+        with open("/proc/stat") as handle:
+            fields = [int(value) for value in handle.readline().split()[1:]]
+        idle = fields[3] + fields[4]
+        total = sum(fields)
+
+        if self.previous is None:
+            self.previous = (idle, total)
+            return 0
+
+        idle_delta = idle - self.previous[0]
+        total_delta = total - self.previous[1]
+        self.previous = (idle, total)
+        if total_delta <= 0:
+            return 0
+        return int(100 * (total_delta - idle_delta) / total_delta)
+
+    def memory_percent(self):
+        values = {}
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                key, _, rest = line.partition(":")
+                values[key] = int(rest.split()[0])
+        total = values.get("MemTotal", 1)
+        available = values.get("MemAvailable", 0)
+        return int(100 * (total - available) / total)
+
+    def render(self, screen, context):
+        usage = self.cpu_percent()
+        memory = self.memory_percent()
+        with open("/proc/loadavg") as handle:
+            load = float(handle.read().split()[0])
+        with open("/proc/uptime") as handle:
+            uptime = float(handle.read().split()[0])
+
+        screen.frame_and_title(self.title)
+        for row, (label, percent) in enumerate((("CPU", usage), ("MEM", memory))):
+            y = 12 + row * 10
+            screen.text(3, y, label)
+            screen.bar(28, y, 88, 8, percent)
+            screen.text(122, y, "%3d%%" % percent)
+
+        hours = int(uptime // 3600)
+        screen.text(3, 33, "LOAD %.2f   UP %dh%02dm" % (load, hours, int(uptime % 3600) // 60))
+
+
+class MediaVisual:
+    name = "media"
+    title = "MEDIA"
+    interval = 1.0
+
+    def metadata(self):
+        """What the running media player reports, or None."""
+        try:
+            result = subprocess.run(
+                ["playerctl", "metadata", "--format",
+                 "{{status}}|{{artist}}|{{title}}|{{position}}|{{mpris:length}}"],
+                capture_output=True, text=True, timeout=0.5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        parts = (result.stdout.strip().split("|") + [""] * 5)[:5]
+        return parts
+
+    def render(self, screen, context):
+        screen.frame_and_title(self.title)
+        data = self.metadata()
+
+        if data is None:
+            screen.text(centred("no player"), 18, "no player")
+            return
+
+        status, artist, title, position, length = data
+        playing = "playing" if status == "Playing" else status.lower() or "stopped"
+        screen.text(3, 12, (title or "unknown")[:24])
+        screen.text(3, 21, (artist or "")[:24])
+
+        try:
+            done = int(position) // 1_000_000
+            total = int(length) // 1_000_000
+        except (TypeError, ValueError):
+            done, total = 0, 0
+
+        percent = int(100 * done / total) if total else 0
+        screen.bar(3, 32, 110, 8, percent)
+        screen.text(118, 32, ("%d:%02d" % (done // 60, done % 60)) if total else playing)
+
+
+class PadVisual:
+    name = "pad"
+    title = "PAD"
+    interval = 1.0
+
+    def render(self, screen, context):
+        screen.frame_and_title(self.title)
+        profile = context.get("profile", 0)
+        screen.text(3, 12, "PROFILE M%d" % (profile + 1))
+
+        recording = "RECORDING" if context.get("recording") else "idle"
+        screen.text(3, 21, "MR: %s" % recording)
+
+        recent = context.get("recent", [])
+        screen.text(3, 31, " ".join(recent[-6:]) or "-")
+
+
+class CustomVisual:
+    name = "custom"
+    title = "CUSTOM"
+    interval = 1.0
+
+    def render(self, screen, context):
+        screen.frame_and_title(self.title)
+        path = config_dir() / "screen.txt"
+        try:
+            lines = path.read_text().splitlines()
+        except OSError:
+            lines = []
+
+        if not lines:
+            screen.text(3, 18, "put text in")
+            screen.text(3, 28, "screen.txt")
+            return
+
+        for index, line in enumerate(lines[:4]):
+            screen.text(3, 12 + index * 8, line)
+
+    def lines(self):
+        # The visual's own name for the menu.
+        return self.name
+
+
+VISUALS = [ClockVisual(), SystemVisual(), MediaVisual(), PadVisual(), CustomVisual()]
+VISUALS_BY_NAME = {visual.name: visual for visual in VISUALS}
+
+
+class Engine:
+    """Turns button presses into a screen.
+
+    Kept free of sockets and timers so it can be driven directly in tests.
+    """
+
+    def __init__(self, config=None, clock=time.monotonic):
+        self.clock = clock
+        self.config = config or {}
+        self.enabled = [name for name in self.config.get("enabled", [v.name for v in VISUALS])
+                        if name in VISUALS_BY_NAME] or [VISUALS[0].name]
+        self.active = self.config.get("active", self.enabled[0])
+        if self.active not in VISUALS_BY_NAME:
+            self.active = self.enabled[0]
+        self.cycle = bool(self.config.get("cycle", False))
+        self.cycle_seconds = float(self.config.get("cycle_seconds", 10))
+
+        self.menu_open = False
+        self.menu_index = 0
+        self.recent = []
+        self.recording = False
+        self.profile = 0
+
+        self.menu_button_pressed_at = None
+        self.last_cycle_at = clock()
+
+    # --- configuration ---
+
+    def snapshot(self):
+        """The part of the state that belongs in the config file."""
+        return {
+            "enabled": self.enabled,
+            "active": self.active,
+            "cycle": self.cycle,
+            "cycle_seconds": self.cycle_seconds,
+        }
+
+    # --- what is on the menu ---
+
+    def menu_items(self):
+        items = [("cycle", "Auto-cycle: %s" % ("on" if self.cycle else "off"))]
+        for name in self.enabled:
+            items.append((name, VISUALS_BY_NAME[name].name.title()))
+        return items
+
+    def switch_to(self, name):
+        if name in VISUALS_BY_NAME:
+            self.active = name
+            self.last_cycle_at = self.clock()
+
+    def next_visual(self):
+        if self.active in self.enabled:
+            index = self.enabled.index(self.active)
+        else:
+            index = -1
+        self.switch_to(self.enabled[(index + 1) % len(self.enabled)])
+
+    # --- events ---
+
+    def on_key(self, code, pressed):
+        """Handles one physical key change from the pad."""
+        if pressed:
+            self.recent.append(KEY_NAMES.get(code, "code %d" % code))
+            self.recent = self.recent[-6:]
+
+        if code == MENU_BUTTON:
+            self.on_menu_button(pressed)
+            return
+
+        if not self.menu_open or not pressed:
+            return
+
+        if code == BUTTON_UP:
+            self.menu_index = (self.menu_index - 1) % len(self.menu_items())
+        elif code == BUTTON_DOWN:
+            self.menu_index = (self.menu_index + 1) % len(self.menu_items())
+        elif code == BUTTON_SELECT:
+            self.select_menu_item()
+        elif code == BUTTON_BACK:
+            self.menu_open = False
+
+    def on_menu_button(self, pressed):
+        """G24: a tap moves on, holding it opens the menu."""
+        now = self.clock()
+        if pressed:
+            self.menu_button_pressed_at = now
+            return
+
+        held_for = now - self.menu_button_pressed_at if self.menu_button_pressed_at else 0
+        self.menu_button_pressed_at = None
+
+        if held_for >= LONG_PRESS_SECONDS:
+            self.menu_open = not self.menu_open
+            self.menu_index = 0
+        elif self.menu_open:
+            self.menu_open = False
+        else:
+            self.next_visual()
+
+    def select_menu_item(self):
+        key, _label = self.menu_items()[self.menu_index]
+        if key == "cycle":
+            self.cycle = not self.cycle
+        else:
+            self.switch_to(key)
+            self.menu_open = False
+        self.menu_index = 0
+
+    def on_state(self, what, value):
+        """State the driver broadcasts, e.g. recording starting."""
+        if what == "recording":
+            self.recording = bool(value)
+        elif what == "profile":
+            self.profile = int(value)
+
+    # --- output ---
+
+    def tick(self):
+        """Returns the lines to draw, or None when nothing needs redrawing."""
+        now = self.clock()
+        if self.cycle and not self.menu_open and now - self.last_cycle_at >= self.cycle_seconds:
+            self.next_visual()
+
+        screen = Screen()
+        if self.menu_open:
+            self.render_menu(screen)
+        else:
+            VISUALS_BY_NAME[self.active].render(screen, {
+                "recording": self.recording,
+                "profile": self.profile,
+                "recent": self.recent,
+            })
+        return screen.lines()
+
+    def render_menu(self, screen):
+        """A vertical menu, four rows at a time, scrolling with the selection."""
+        items = self.menu_items()
+        per_page = 4
+
+        screen.rect(0, 0, g13lcd.VISIBLE_WIDTH, 1)
+        screen.text(3, 1, "VISUALS")
+
+        # Keep the selection on screen when there are more items than fit.
+        first = 0
+        if len(items) > per_page:
+            first = max(0, min(self.menu_index - per_page // 2, len(items) - per_page))
+
+        for row, (_key, label) in enumerate(items[first:first + per_page]):
+            index = first + row
+            y = 11 + row * 8
+            if index == self.menu_index:
+                # The screen has one colour of ink, so a selection cannot be a filled
+                # row with text on it - the text would disappear into it. A marker bar
+                # beside the label and a line underneath say the same thing and leave
+                # the pixels the text needs blank.
+                screen.rect(2, y, 5, y + 7)
+                screen.rect(8, y + 7, g13lcd.VISIBLE_WIDTH - 3, y + 8)
+            screen.text(9, y, label[:24])
+
+    def interval(self):
+        """How long until this visual needs redrawing."""
+        return 1.0 if self.menu_open else VISUALS_BY_NAME[self.active].interval
+
+
+def read_config():
+    path = config_dir() / "visuals.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def write_config(snapshot):
+    path = config_dir() / "visuals.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(snapshot, indent=2) + "\n")
+    except OSError as error:
+        print("could not save %s: %s" % (path, error), file=sys.stderr)
+
+
+def main():
+    engine = Engine(read_config())
+    config_stamp = None
+    last_poll = 0.0
+    last_drawn = 0.0
+    dirty = True
+    shown_state = None
+
+    while True:
+        # --- the driver's event socket, reconnecting as needed ---
+        try:
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            connection.settimeout(0.2)
+            connection.connect(str(socket_path()))
+        except OSError:
+            time.sleep(RECONNECT_SECONDS)
+            last_poll = 0.0
+            continue
+
+        print("g13-visuals: connected to %s, showing '%s'" % (socket_path(), engine.active), flush=True)
+        pending = b""
+
+        while True:
+            try:
+                chunk = connection.recv(4096)
+            except socket.timeout:
+                chunk = None
+            except OSError:
+                chunk = b""
+
+            if chunk == b"":
+                break  # Driver went away; reconnect.
+
+            if chunk:
+                pending += chunk
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    fields = line.decode(errors="replace").split()
+                    if len(fields) >= 3 and fields[0] == "key":
+                        engine.on_key(int(fields[1]), fields[2] != "0")
+                        dirty = True
+                    elif len(fields) >= 3 and fields[0] == "state":
+                        engine.on_state(fields[1], fields[2])
+                        dirty = True
+
+            now = time.monotonic()
+
+            # --- pick up config changes made elsewhere (the config tool) ---
+            if now - last_poll >= CONFIG_POLL_SECONDS:
+                last_poll = now
+                path = config_dir() / "visuals.json"
+                try:
+                    stamp = path.stat().st_mtime
+                except OSError:
+                    stamp = None
+                if stamp != config_stamp and stamp is not None:
+                    config_stamp = stamp
+                    fresh = Engine(read_config(), clock=engine.clock)
+                    if fresh.snapshot() != engine.snapshot():
+                        engine = fresh
+                        dirty = True
+
+            # --- draw when the visual asks for it, or straight after a button ---
+            if dirty or now - last_drawn >= engine.interval():
+                g13lcd.send(engine.tick())
+                last_drawn = now
+                if shown_state != engine.snapshot():
+                    shown_state = engine.snapshot()
+                    write_config(shown_state)
+                dirty = False
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

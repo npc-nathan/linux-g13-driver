@@ -80,6 +80,12 @@ install:
 	install -m 755 scripts/g13-keywatch $(DESTDIR)$(BINDIR)/g13-keywatch
 	install -m 755 scripts/g13-lcd $(DESTDIR)$(BINDIR)/g13-lcd
 	install -m 755 scripts/g13-watch $(DESTDIR)$(BINDIR)/g13-watch
+	install -m 644 scripts/g13lcd.py $(DESTDIR)$(BINDIR)/g13lcd.py
+	install -m 755 ../g13-visuals/g13-visuals $(DESTDIR)$(BINDIR)/g13-visuals
+	sed 's|%h/.local/bin|$(BINDIR)|g' ../g13-visuals/systemd/g13-visuals.service > g13-visuals.service
+	install -d $(DESTDIR)$(SYSTEMDDIR)
+	install -m 644 g13-visuals.service $(DESTDIR)$(SYSTEMDDIR)/g13-visuals.service
+	rm g13-visuals.service
 	
 	# Systemd (Copy static file)
 	install -d $(DESTDIR)$(SYSTEMDDIR)
@@ -108,7 +114,14 @@ install-user:
 	cp scripts/g13-keywatch $(USER_INSTALL_DIR)/g13-keywatch
 	cp scripts/g13-lcd $(USER_INSTALL_DIR)/g13-lcd
 	cp scripts/g13-watch $(USER_INSTALL_DIR)/g13-watch
+	cp scripts/g13lcd.py $(USER_INSTALL_DIR)/g13lcd.py
 	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch
+	
+	# Screen visuals (applets and menu)
+	cp ../g13-visuals/g13-visuals $(USER_INSTALL_DIR)/g13-visuals
+	chmod +x $(USER_INSTALL_DIR)/g13-visuals
+	install -d $(USER_SYSTEMD_DIR)
+	install -m 644 ../g13-visuals/systemd/g13-visuals.service $(USER_SYSTEMD_DIR)/g13-visuals.service
 	
 	# Wrapper
 	echo '#!/bin/sh' > $(USER_INSTALL_DIR)/g13-gui

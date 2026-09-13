@@ -188,6 +188,42 @@ with their key names (`g13-watch --press` for presses only). Note that the displ
 L1-L4 are the screen's menu buttons (the kernel calls them `KEY_KBD_LCD_MENU1..4`) and are
 not profile selectors.
 
+## The screen's visuals and menu
+
+`g13-visuals` (a user service, installed and enabled by `make install-user`) owns the
+screen once it is running. Buttons on the pad drive it:
+
+| Button | Action |
+| --- | --- |
+| **G24** (round button left of the screen) | short press: next visual; hold: open/close the menu |
+| **L1** | back (closes the menu) |
+| **L2** / **L3** | up / down |
+| **L4** | select |
+
+Visuals: `clock`, `system` (cpu, memory, load, uptime), `media` (whatever `playerctl`
+reports), `pad` (active profile, recording state, recent presses) and `custom` (four lines
+from `$XDG_CONFIG_HOME/g13/screen.txt`, so anything that can write a file can drive the
+screen). The menu also toggles **auto-cycle**, which steps through the enabled visuals on a
+timer; a tap of G24 always moves on regardless.
+
+Which visuals are enabled, their order, the current one and the cycle time live in
+`$XDG_CONFIG_HOME/g13/visuals.json`. The daemon reloads that file within a second of it
+changing, so the config tool can edit it without anything being restarted:
+
+```json
+{
+  "enabled": ["clock", "system", "media", "pad", "custom"],
+  "active": "clock",
+  "cycle": false,
+  "cycle_seconds": 10
+}
+```
+
+The screen is one colour of ink, so a menu selection cannot be a filled row with text on
+it - the text would vanish into it. The selected row gets a marker bar beside the label and
+a line underneath instead, and every visual keeps its text on blank pixels. That rule is
+enforced by the tests, not just by convention.
+
 ## Record mode (the MR button)
 
 Press **MR** on the pad while the config tool is open:
