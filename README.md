@@ -296,6 +296,36 @@ pad deaf to its own buttons. While a client owns the screen the daemon stops dra
 stops reading the buttons, and it says so in the tool ("now: the SDK client"): the preview
 then shows the last frame the visuals drew, not what is on the panel.
 
+## A game on the screen: Cyberpunk 2077
+
+The pad can show a game's own numbers. `g13-cet-mod/` is a Cyber Engine Tweaks mod that writes
+the game's state to a small JSON file about five times a second:
+
+```bash
+./g13-cet-mod/install.sh                       # default game: ~/Games/Heroic/Cyberpunk 2077
+./g13-cet-mod/install.sh "/path/to/Cyberpunk 2077"
+./g13-cet-mod/install.sh --remove              # takes the mod and the applet away again
+```
+
+It reads health, stamina, level and street cred, the tracked quest and objective (the text
+resolved from its loc key), the held weapon and its ammo where the build answers for it, and your
+position and heading. The applet `cp2077-hud` draws them: health as segments, ammo, the objective
+scrolling along, and a compass arrow. On the pad, tap the round button until it reads **NIGHT
+CITY**, or pick it in the Screen window and press **Show now**. Its own `README.md` lists every
+field and how sure each one is.
+
+Two deliberate gaps: there is **no turn-by-turn arrow yet** (nothing found reads the tracked
+waypoint's world position, so the arrow is the direction you are facing, from
+`GetWorldForward()`), and **ammo is probed, not known**, because builds differ in what they
+answer. `G13Probe()` in the CET console prints what yours allows; every uncertain call is guarded,
+so a build that refuses one leaves a blank rather than an error.
+
+**Which framework?** CET (Lua) is the only practical way to get live state out of a running
+Cyberpunk 2077 — it can write files, and REDscript cannot. REDscript is also Cyberpunk-only (its
+own README says so), and The Witcher 3's REDkit/REDmod scripts have no Lua layer to inject into,
+so the two do not share a mod framework despite the shared engine. That does not matter here:
+anything that can write a JSON file, or call the Logitech LCD SDK above, can drive this panel.
+
 ## The event bus
 
 Pad presses are published on a Unix socket, `$XDG_RUNTIME_DIR/g13.sock`, owner-only:

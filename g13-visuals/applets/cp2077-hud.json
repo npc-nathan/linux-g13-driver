@@ -1,0 +1,29 @@
+{
+  "name": "cp2077-hud",
+  "title": "NIGHT CITY",
+  "border": true,
+  "interval": 0.2,
+  "sources": {
+    "health": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#health",
+    "ammo": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#ammo",
+    "ammo_total": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#ammo_total",
+    "level": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#level",
+    "objective": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#objective",
+    "quest": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#quest",
+    "weapon": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#weapon",
+    "heading": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#heading",
+    "handling": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#mod"
+  },
+  "widgets": [
+    {"type": "segments", "x": 3, "y": 12, "w": 56, "h": 5, "count": 11, "source": "health", "max": 100},
+    {"type": "text", "x": 62, "y": 12, "format": "AMMO {ammo:>3}"},
+    {"type": "text", "y": 12, "align": "right", "format": "LVL {level:>2}"},
+
+    {"type": "text", "x": 3, "y": 20, "format": "{objective}", "scroll": true, "scroll_width": 25, "scroll_speed": 3},
+
+    {"type": "line", "x": 1, "y": 27, "w": 158},
+    {"type": "brackets", "x": 1, "y": 28, "w": 18, "h": 13, "len": 5, "thick": 2},
+    {"type": "arrow", "x": 10, "y": 34, "r": 6, "source": "heading"},
+    {"type": "text", "x": 23, "y": 32, "format": "HDG {heading}  {weapon}", "scroll": true, "scroll_width": 22, "scroll_speed": 2}
+  ]
+}

@@ -181,6 +181,21 @@ check("applet draws its title", True, any(line.endswith(" STATS") and line.start
 check("applet formats values", True, any(line.startswith("#text 3 12 CPU ") for line in lines))
 check("applet draws its box", True, screen.rows[22].count(1) > 100)
 
+# A live value that has not arrived yet - the game is not running - reads as blank rather than
+# "?", which is kept for a format that cannot be read at all.
+blank_definition = {
+    "name": "blank", "interval": 1,
+    "widgets": [
+        {"type": "text", "x": 3, "y": 12, "format": "AMMO {ammo:>3}  {objective}"},
+        {"type": "text", "x": 3, "y": 20, "format": "{ammo:>Z}"},
+    ],
+}
+blank_screen = gv.Screen()
+gv.LayoutVisual(blank_definition, gv.Values()).render(blank_screen, {})
+blank_lines = [message for _x, _y, message in blank_screen.texts]
+check("a missing live value reads as blank", "AMMO", blank_lines[0].rstrip())
+check("a format that cannot be read still says so", "?", blank_lines[1])
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:

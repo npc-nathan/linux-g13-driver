@@ -236,6 +236,17 @@ class Screen:
         return lines
 
 
+class _Blank(dict):
+    """Format values where a field that has no value yet reads as blank.
+
+    A live value that is not there - the game not running, a file not written - should not
+    put "?" on the screen; that is for a format that cannot be read at all.
+    """
+
+    def __missing__(self, key):
+        return ""
+
+
 def centred(message, width=None):
     """Left padding that centres a string on the screen."""
     width = width or g13lcd.VISIBLE_WIDTH
@@ -686,9 +697,12 @@ class LayoutVisual:
                 if template is None:
                     message = str(self.value_of(widget.get("source")))
                 else:
+                    # A field with no value yet - the game is not running, the file has not
+                    # been written - reads as blank. "?" is kept for a format that cannot be
+                    # read at all, which is a mistake in the applet rather than missing data.
                     try:
-                        message = template.format(**values)
-                    except (KeyError, ValueError, IndexError):
+                        message = template.format_map(_Blank(values))
+                    except (ValueError, IndexError):
                         message = "?"
 
                 # A long line - an objective, a track title - slides along rather than
