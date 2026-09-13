@@ -1,6 +1,11 @@
 [Unit]
 Description=Logitech G13 User Space Driver
 After=graphical-session.target
+# The driver creates a tray icon, so it needs an X11/Wayland display. Without
+# this it is started at login before the graphical session exists, gtk_init()
+# fails with "cannot open display" and systemd restarts it until the session
+# is up.
+Wants=graphical-session.target
 
 [Service]
 Type=simple
