@@ -25,13 +25,13 @@ GUI_JAR_NAME:= Linux-G13-GUI.jar
 # Config Paths (Source)
 BINDINGS_SRC:= ../bindings/.g13
 
-.PHONY: all dependencies build-driver build-gui clean install install-user uninstall
+.PHONY: all dependencies build-driver build-gui build-lcdsdk build-lcdsdk-windows test-lcdsdk clean install install-user uninstall
 
 # =============================================================================
 # Main Workflow
 # =============================================================================
 # "all" is for the human user -> checks deps + builds everything
-all: dependencies build-driver build-gui
+all: dependencies build-driver build-gui build-lcdsdk
 	@echo "Build complete."
 	@echo " -> Run 'sudo make install' to install system-wide (Package Mode)."
 	@echo " -> Run 'make install-user' to install for current user (Dev Mode)."
@@ -52,6 +52,21 @@ build-driver:
 build-gui:
 	@echo "--- Building Java GUI ---"
 	cd $(GUI_ROOT) && mvn clean package -DskipTests
+
+# The Logitech LCD SDK, for programs that expect a LogitechLcd.dll: same functions, same
+# types, forwarding to this driver. Nothing here needs the device to build or test.
+build-lcdsdk:
+	@echo "--- Building the Logitech LCD SDK ---"
+	$(MAKE) -C lcdsdk
+
+# A proxy LogitechLcd.dll for Wine/Proton, so games with native Logitech LCD support can
+# drive the panel. Needs mingw-w64; untested against a real game.
+build-lcdsdk-windows:
+	$(MAKE) -C lcdsdk windows
+
+test-lcdsdk: build-lcdsdk
+	python3 scripts/lcdsdk-test.py
+
 
 # =============================================================================
 # System-Wide Installation (Root / Package Manager)
@@ -122,6 +137,10 @@ install-user:
 	chmod +x $(USER_INSTALL_DIR)/g13-visuals
 	install -d $(USER_SYSTEMD_DIR)
 	install -m 644 ../g13-visuals/systemd/g13-visuals.service $(USER_SYSTEMD_DIR)/g13-visuals.service
+
+	# The Logitech LCD SDK: anything that calls LogitechLcd.dll finds this instead
+	$(MAKE) -C lcdsdk
+	$(MAKE) -C lcdsdk install PREFIX=$(HOME)/.local
 	
 	# Wrapper
 	echo '#!/bin/sh' > $(USER_INSTALL_DIR)/g13-gui

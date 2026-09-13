@@ -171,6 +171,40 @@ Windows-only binaries, so nothing on Linux can load them and games with built-in
 Logitech LCD support cannot be pointed at this. What is reproducible is the mechanism
 they used: an application pushes data, the driver renders it.
 
+## The Logitech LCD SDK, on Linux
+
+Games and applets written against Logitech's SDK call `LogitechLcd.dll`, which ships with
+Logitech Gaming Software on Windows - which is why a panel like this one shows nothing from
+them here, and why "Logitech supports this game" never helped on Linux. `src/lcdsdk/` is that
+missing half: the same functions, the same types, the same button bits, forwarding to this
+driver.
+
+    make build-lcdsdk          # liblogitechlcd.so and the self-test
+    make test-lcdsdk           # the whole surface, checked without a device
+    make build-lcdsdk-windows  # a proxy LogitechLcd.dll for Wine/Proton; needs mingw-w64
+
+`make install-user` puts the library in `~/.local/lib` and the header in `~/.local/include`.
+
+What each call becomes:
+
+| SDK call | here |
+| --- | --- |
+| `LogiLcdInit(name, MONO)` | opens the driver's LCD pipe; false when the driver is not running |
+| `LogiLcdIsConnected(MONO)` | whether that pipe is open - `COLOR` is always false, this panel is monochrome |
+| `LogiLcdMonoSetText(line, text)` | line 0..3, drawn at x=3, y = 2 + 10 * line |
+| `LogiLcdMonoSetBackground(bitmap)` | the whole 160x43 field, 8 bits per pixel, pixel on at >= 128 |
+| `LogiLcdUpdate()` | one frame: the background as `#bitmap`, then the text lines as `#text` |
+| `LogiLcdIsButtonPressed(mask)` | the four mono buttons (`0x01, 0x02, 0x04, 0x08`) are L1..L4 on the pad |
+| `LogiLcdShutdown()` | closes up |
+
+`LogiLcdUpdate()` writes the whole frame in a single write, because the driver paints whatever
+arrives in one `read()` as one frame - which is what keeps a screen built from several lines
+from flickering.
+
+Limits, stated rather than discovered later: two programs calling `LogiLcdUpdate()` will fight
+over the screen (Logitech's LCD Manager rotated between applets; there is no manager here), and
+the Windows proxy has never been run against a game.
+
 ## The event bus
 
 Pad presses are published on a Unix socket, `$XDG_RUNTIME_DIR/g13.sock`, owner-only:

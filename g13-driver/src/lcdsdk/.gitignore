@@ -1,0 +1,5 @@
+liblogitechlcd.so
+lcdsdk-selftest
+LogitechLcd.dll
+build/
+__pycache__/
