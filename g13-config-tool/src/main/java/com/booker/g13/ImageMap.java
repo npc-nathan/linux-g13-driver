@@ -9,7 +9,6 @@ import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import javax.swing.ImageIcon;
 import javax.swing.JLabel;
@@ -34,9 +33,6 @@ public class ImageMap extends JLabel {
 	private final Color selectedColor = new Color(0, 255, 0, 128); // Semi-transparent green for selected key.
 	private final Color mouseoverColor = new Color(255, 0, 0, 128); // Semi-transparent red for hovered key.
     
-    /** A set of keycodes for the M1-M3 and MR keys, which are used to switch binding profiles. */
-    private static final Set<Integer> BINDING_SWITCH_KEYS = Set.of(25, 26, 27, 28);
-
 	private Key selected = null; // The currently clicked/selected key.
 	private Key mouseover = null; // The key currently under the mouse cursor.
 	
@@ -198,11 +194,11 @@ public class ImageMap extends JLabel {
      */
     private void drawTooltip(Graphics2D g, Key key) {
         String[][] lines;
-        // Display different information for binding-switch keys vs. regular keys.
-        if (BINDING_SWITCH_KEYS.contains(key.getG13KeyCode())) {
+        // Display different information for profile buttons vs. regular keys.
+        if (Key.isProfileKey(key.getG13KeyCode())) {
             lines = new String[][]{
-                {"G13 Key", "M" + (key.getG13KeyCode() - 24)},
-                {"Configuration", "bindings-" + (key.getG13KeyCode() - 25) + ".properties"},
+                {"G13 Key", Key.profileKeyName(key.getG13KeyCode())},
+                {"Configuration", "bindings-" + Key.profileIndexFor(key.getG13KeyCode()) + ".properties"},
                 {"This button is reserved to load bindings", ""},
             };
         } else {

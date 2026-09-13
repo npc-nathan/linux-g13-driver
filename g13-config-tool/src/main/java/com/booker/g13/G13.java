@@ -3,7 +3,6 @@ package com.booker.g13;
 import java.awt.BorderLayout;
 import java.io.IOException;
 import java.util.Properties;
-import java.util.Set;
 
 import javax.swing.BorderFactory;
 import javax.swing.JFrame;
@@ -32,20 +31,6 @@ public class G13 extends JPanel {
 	 * The maximum number of macros that can be configured.
 	 */
 	private static final int MAX_MACROS = 200;
-
-	// Named constants for the G13 keycodes of the M1, M2, M3, and MR buttons.
-    private static final int BINDING_KEY_M1 = 25;
-    private static final int BINDING_KEY_M2 = 26;
-    private static final int BINDING_KEY_M3 = 27;
-    private static final int BINDING_KEY_MR = 28;
-    
-    /**
-     * A set containing the keycodes for the binding switch keys (M1, M2, M3, MR).
-     * Used for quick lookups to check if a pressed key should switch the current binding profile.
-     */
-    private static final Set<Integer> BINDING_SWITCH_KEYS = Set.of(
-            BINDING_KEY_M1, BINDING_KEY_M2, BINDING_KEY_M3, BINDING_KEY_MR
-    );
 	
 	// UI Components
 	private final ImageMap g13Label = new ImageMap(); // The interactive G13 keypad image.
@@ -77,10 +62,9 @@ public class G13 extends JPanel {
 					return;
 				}
 				
-				// Check if the selected key is one of the binding switch keys (M1-M3, MR).
-				if (BINDING_SWITCH_KEYS.contains(key.getG13KeyCode())) {
-					// Switch the active binding profile.
-					mapBindings(key.getG13KeyCode() - BINDING_KEY_M1);
+				// Profile buttons (M1, M2, M3, MR) switch the active binding set.
+				if (Key.isProfileKey(key.getG13KeyCode())) {
+					mapBindings(Key.profileIndexFor(key.getG13KeyCode()));
 				} else {
 					// A regular key was selected, pass it to the keybind panel for editing.
 					keybindPanel.setSelectedKey(key);

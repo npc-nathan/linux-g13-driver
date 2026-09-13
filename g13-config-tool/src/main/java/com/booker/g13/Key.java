@@ -100,6 +100,69 @@ public class Key {
                 .orElse(null);
 	}
 	
+	// --- Profile (binding set) buttons ---
+
+	/**
+	 * G13 keycode of the M1 button. The four profile buttons are M1, M2, M3
+	 * and MR, sitting on keycodes 29-32; they select bindings-0.properties to
+	 * bindings-3.properties, in that order.
+	 */
+	public static final int PROFILE_KEY_M1 = 29;
+
+	/** Number of profile buttons (M1, M2, M3, MR). */
+	public static final int PROFILE_KEY_COUNT = 4;
+
+	/**
+	 * Legacy profile buttons: before the M buttons were wired up, the four
+	 * display buttons (L1-L4, keycodes 25-28) selected the same four profiles.
+	 * The driver still accepts them as aliases.
+	 */
+	public static final int PROFILE_KEY_LEGACY_L1 = 25;
+
+	/**
+	 * @param g13KeyCode The keycode to test.
+	 * @return true if this key selects a binding profile instead of mapping a key.
+	 */
+	public static boolean isProfileKey(int g13KeyCode) {
+		return (g13KeyCode >= PROFILE_KEY_M1 && g13KeyCode < PROFILE_KEY_M1 + PROFILE_KEY_COUNT)
+				|| (g13KeyCode >= PROFILE_KEY_LEGACY_L1
+						&& g13KeyCode < PROFILE_KEY_LEGACY_L1 + PROFILE_KEY_COUNT);
+	}
+
+	/**
+	 * @param g13KeyCode The keycode of a profile button.
+	 * @return The profile index (0-3) that this button selects, or -1 if the
+	 *         keycode is not a profile button.
+	 */
+	public static int profileIndexFor(int g13KeyCode) {
+		if (!isProfileKey(g13KeyCode)) {
+			return -1;
+		}
+		return g13KeyCode >= PROFILE_KEY_M1
+				? g13KeyCode - PROFILE_KEY_M1
+				: g13KeyCode - PROFILE_KEY_LEGACY_L1;
+	}
+
+	/**
+	 * @param g13KeyCode The keycode of a profile button.
+	 * @return The label printed on the device, e.g. "M2" or "MR".
+	 */
+	public static String profileKeyName(int g13KeyCode) {
+		if (g13KeyCode >= PROFILE_KEY_M1 && g13KeyCode < PROFILE_KEY_M1 + PROFILE_KEY_COUNT) {
+			return switch (g13KeyCode - PROFILE_KEY_M1) {
+				case 0 -> "M1";
+				case 1 -> "M2";
+				case 2 -> "M3";
+				default -> "MR";
+			};
+		}
+		if (g13KeyCode >= PROFILE_KEY_LEGACY_L1
+				&& g13KeyCode < PROFILE_KEY_LEGACY_L1 + PROFILE_KEY_COUNT) {
+			return "L" + (g13KeyCode - PROFILE_KEY_LEGACY_L1 + 1);
+		}
+		return "G" + g13KeyCode;
+	}
+
 	// --- Instance Properties ---
 	private final Shape shape; // The polygon shape of the key for UI interaction.
 	private final int g13KeyCode; // The unique identifier for this key.
