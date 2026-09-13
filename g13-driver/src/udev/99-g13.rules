@@ -1,2 +1,9 @@
+# Logitech G13 (046d:c21c): USB access for the user-space driver.
 SUBSYSTEM=="usb", ATTR{idVendor}=="046d", ATTR{idProduct}=="c21c", MODE="0666", TAG+="uaccess"
+
+# uinput, the kernel interface the driver creates its virtual devices with.
 KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", OPTIONS+="static_node=uinput", TAG+="uaccess"
+
+# The driver's own virtual keyboard and mouse. Without this, reading their events
+# (evtest, g13-keywatch, some games) needs root.
+SUBSYSTEM=="input", ATTRS{name}=="G13", MODE="0660", GROUP="plugdev", TAG+="uaccess"

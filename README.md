@@ -69,7 +69,13 @@ Driver: Installed to ~/.local/bin/linux-g13-driver
 
 Service: Automatically enabled and started immediately.
 
-Note on Permissions: Both methods install a UDEV rule (/etc/udev/rules.d/99-g13.rules) to allow access to the G13 without sudo. You might need to unplug and replug your device once after installation if it's not detected immediately.
+Note on Permissions: Both methods install a UDEV rule (/etc/udev/rules.d/99-g13.rules) to allow access to the G13 without sudo. You might need to unplug and replug your device once after installation if it's not detected immediately. The same rule makes the driver's virtual keyboard readable by the `plugdev` group, so `evtest` and `g13-keywatch` work without root.
+
+Checking what a binding sends: run `g13-keywatch` (installed to ~/.local/bin) and press
+keys on the pad; it prints the events the driver emits, including the M button codes
+(`688` = MR, `691`/`692`/`693` = M1/M2/M3). If it says the device is not readable, the
+udev rule is missing: `sudo cp udev/99-g13.rules /etc/udev/rules.d/` and
+`sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-match=input`.
 
 ## How to use the Driver and GUI
 

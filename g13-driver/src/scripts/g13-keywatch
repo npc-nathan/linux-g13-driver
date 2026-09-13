@@ -1,0 +1,38 @@
+#!/bin/sh
+# Watch the G13's virtual keyboard and print the events it emits.
+# Useful for checking what a binding actually sends.
+#
+#   g13-keywatch
+#
+# If it reports that the device is not readable, either run it as root with the
+# full path, or install udev/99-g13.rules which grants the plugdev group access
+# to the driver's virtual devices.
+set -e
+
+dev=""
+for d in /sys/class/input/event*; do
+    if [ "$(cat "$d/device/name" 2>/dev/null)" = "G13" ]; then
+        dev="/dev/input/$(basename "$d")"
+    fi
+done
+
+if [ -z "$dev" ]; then
+    echo "G13 virtual device not found - is g13.service running?" >&2
+    echo "  systemctl --user status g13.service" >&2
+    exit 1
+fi
+
+if [ ! -r "$dev" ] && [ "$(id -u)" != "0" ]; then
+    echo "$dev is not readable by $(id -un)." >&2
+    echo "  Install the udev rule (udev/99-g13.rules) so plugdev can read it, or:" >&2
+    echo "  sudo $(readlink -f "$0")" >&2
+    exit 1
+fi
+
+if ! command -v evtest >/dev/null 2>&1; then
+    echo "evtest is not installed:  sudo apt install evtest" >&2
+    exit 1
+fi
+
+echo "Watching $dev - press G13 keys, Ctrl-C to stop."
+exec evtest "$dev"

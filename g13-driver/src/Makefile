@@ -76,6 +76,9 @@ install:
 	install -d $(DESTDIR)$(UDEVDIR)
 	install -m 644 udev/99-g13.rules $(DESTDIR)$(UDEVDIR)/99-g13.rules
 	
+	# Debug helper
+	install -m 755 scripts/g13-keywatch $(DESTDIR)$(BINDIR)/g13-keywatch
+	
 	# Systemd (Copy static file)
 	install -d $(DESTDIR)$(SYSTEMDDIR)
 	install -m 644 $(SERVICE_SRC) $(DESTDIR)$(SYSTEMDDIR)/g13.service
@@ -100,6 +103,8 @@ install-user:
 	# Copy Files
 	cp $(TARGET_PATH) $(USER_INSTALL_DIR)/linux-g13-driver
 	cp $(GUI_JAR_SRC) $(USER_INSTALL_DIR)/$(GUI_JAR_NAME)
+	cp scripts/g13-keywatch $(USER_INSTALL_DIR)/g13-keywatch
+	chmod +x $(USER_INSTALL_DIR)/g13-keywatch
 	
 	# Wrapper
 	echo '#!/bin/sh' > $(USER_INSTALL_DIR)/g13-gui
