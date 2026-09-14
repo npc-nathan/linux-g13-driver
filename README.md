@@ -25,24 +25,31 @@ The original project is over 10 years old. This fork has been refactored to use 
 
 ## Licence and credit
 
-This is a fork of [Lordbooker/linux-g13-driver](https://github.com/Lordbooker/linux-g13-driver), which
-is itself a continuation of earlier work (Tetz95, jim.gupta and others are in the history). **That
-project carries no licence**, and neither does this one. Under GitHub's terms of service that means
-anybody may view and fork it on GitHub — which is what a public fork relies on — but it also means
-the default copyright rules apply: the code may not be redistributed, and no derivative work may be
-made from it, without the permission of its authors. Nothing here grants you a licence that the
-original authors did not give.
+**This project is GPL v2** — version 2 specifically, not "or later" — inherited from the work it
+descends from. The forks in between never carried the licence file forward; this repository restores
+it, which is why it is spelled out here and in [`LICENSE`](LICENSE).
 
-Practically, that means:
+* `jim.gupta` and others — **linux-g13-driver** on Google Code (now archived at
+  `code.google.com/archive/p/linux-g13-driver/`), whose project page states *Code license: GNU GPL v2*.
+  That is the original work, and where the licence comes from.
+* [Tetz95/linux-g13-driver](https://github.com/Tetz95/linux-g13-driver) — a fork of it.
+* [Lordbooker/linux-g13-driver](https://github.com/Lordbooker/linux-g13-driver) — a further fork and
+  the base of this one.
+* This fork (npc-nathan). `git log` is the record of who wrote what.
 
-* **Reading, forking and contributing**: fine, and welcome. Contributors keep their own copyright.
-* **Redistributing, packaging, or shipping a built binary**: ask the original author first.
-* **Adding a licence**: is Lordbooker's call as the maintainer, not ours to make unilaterally. If it
-  is ever licensed, this file will say so and name the terms.
+What that means in practice:
 
-The files written for this fork — the visuals daemon and its applet format, the source kinds, the
-command line tools, the tests and documentation — are the work of this fork's author and are offered
-on the same basis: ask before redistributing, and credit this project and the original.
+* **You may use, study, modify, fork and redistribute this, binaries included**, under the terms of
+  the GPL v2.
+* **If you distribute a binary, the source must be available.** It is: this repository. The recipes
+  in `packaging/` build from a checkout, and any release asset is built from the tagged commit.
+* **Keep the notices.** Do not strip the copyright notices or the licence from what you pass on, and
+  if you change files, say so — GPL v2 section 2a asks for that. The commits of this repository are
+  that record: each change this fork made is one, with the reasoning in its message.
+* **No warranty**, as sections 11 and 12 put it.
+
+Contributions are welcome on the same terms: a pull request offers your work under the GPL v2 like
+the rest of it.
 
 ## Requirements
 

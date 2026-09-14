@@ -1,14 +1,14 @@
 # Maintainer: this fork's author
 #
-# A recipe, not a binary: building it yourself is the point, because the code this is built from
-# carries no licence and may not be redistributed without the original author's permission.
+# GPL v2, inherited from the original project on Google Code - see the README's "Licence and
+# credit". Nothing stops you packaging the result; it just has to stay GPL v2 with its notices.
 pkgname=linux-g13-driver
 pkgver=0.9.0
 pkgrel=1
 pkgdesc="Logitech G13 driver, configuration tool and screen applets"
 arch=('x86_64')
 url="https://github.com/npc-nathan/linux-g13-driver"
-license=('custom:no-licence-upstream')
+license=('GPL2')
 depends=('libusb' 'gtk3' 'libayatana-appindicator' 'jre-openjdk' 'python')
 makedepends=('cmake' 'gcc' 'maven' 'jdk-openjdk')
 install="$pkgname.install"

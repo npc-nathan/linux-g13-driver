@@ -7,9 +7,8 @@
 # hands the result to dpkg-deb. Nothing is copied onto this machine and nothing is installed: the
 # .deb is left in packaging/ for you to install or give away as you see fit.
 #
-# **Read the "Licence and credit" section of the README before giving the result to anybody.** This
-# code carries no licence, so a binary built from it may not be redistributed without the permission
-# of the original authors. Building it for yourself is fine.
+# The project is GPL v2 (see the README's "Licence and credit"): pass the .deb on freely, but keep
+# it GPL v2 and keep the notices - the licence is installed into the package for exactly that reason.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -41,6 +40,9 @@ if [ -d "$stage/etc/udev/rules.d" ]; then
     rmdir -p "$stage/etc/udev/rules.d" 2>/dev/null || true
 fi
 
+# GPL v2 section 1: the licence travels with the binary.
+install -Dm644 "$repo/LICENSE" "$stage/usr/share/doc/$package/copyright"
+
 size="$(du -sk "$stage" | cut -f1)"
 mkdir -p "$stage/DEBIAN"
 cat > "$stage/DEBIAN/control" <<CONTROL
@@ -57,8 +59,8 @@ Description: Logitech G13 driver, configuration tool and screen applets
  Keys, profiles, macros and record mode for the Logitech G13, a configuration tool that previews
  the 160x43 screen, and a daemon that draws applets on it from files, commands, web addresses,
  brokers, sockets and mailboxes.
- This build carries no licence: see the README's "Licence and credit" section before
- redistributing it.
+ Licensed under the GNU General Public License, version 2; the full text is in
+ /usr/share/doc/linux-g13-driver/copyright.
 CONTROL
 
 cat > "$stage/DEBIAN/postinst" <<'POSTINST'
