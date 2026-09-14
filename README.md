@@ -18,8 +18,6 @@ The original project is over 10 years old. This fork has been refactored to use 
   data sources, live values, and the config tool previews it against real data.
 * **Games, through mods, one game at a time.** Applets read what a mod writes - a JSON file
   with `json:`, or a log line with `regex:`. (The old Logitech SDK route is gone: see below.)
-  (`LogiLcdInit`, `LogiLcdMonoSetText`, ...) implemented here, including a PE
-  `LogitechLcd.dll` for games running under Wine/Proton, with `g13-lcd-bridge` relaying.
 * **A Java configuration tool.** Java 17 and Maven, with keys, profiles, macros, and a Screen
   window that shows what the panel is showing.
 * **Helpers you can script.** `g13-lcd`, `g13-watch`, `g13-keywatch`, `g13-buttons`,
@@ -311,7 +309,7 @@ daemon running is what it shows next time it starts.
 
 ```bash
 g13-visuals --list                       # what can be shown, and what is switched on
-g13-visuals --select night-city          # show it now: name, file name, or the title on the pad
+g13-visuals --select applet:gpu          # show it now: name, file name, or the title on the pad
 g13-visuals --enable clock               # add it to what the round button cycles through
 g13-visuals --disable media              # take it out
 g13-visuals --status                     # what is showing, who owns the screen, is the daemon up

@@ -72,6 +72,7 @@ run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/
     python3 "$SCRIPTS/g13-applet" check --all
 
 run "the guide agrees with the code" python3 "$TESTS/DocTest.py"
+run "every command the guides give works" python3 "$TESTS/GuideRunsTest.py"
 run "reading a topic from a broker" python3 "$TESTS/MqttTest.py"
 run "reading a message from a web socket" python3 "$TESTS/WsTest.py"
 run "reading a mailbox" python3 "$TESTS/ImapTest.py"
