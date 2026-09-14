@@ -369,6 +369,39 @@ where_the_services_are = ("/run/user/%d" % os.getuid()
 check("with no XDG_RUNTIME_DIR, paths agree with the services",
       where_the_services_are + "/g13-values.json", thin.stdout.strip())
 
+# --- what applets may read: the sources panel's switches, and the daemon behind them ---------
+# The panel writes sources.json and the daemon enforces it, so the two lists of kinds have to be
+# the same list. A kind the panel offered that the daemon did not know would be a switch that
+# silently did nothing.
+import re
+
+java_sources = open(os.path.join(REPO, "g13-config-tool", "src", "main", "java", "com", "booker",
+                                 "g13", "Sources.java")).read()
+check("the panel lists exactly the kinds the daemon enforces",
+      [kind for kind, _why in gv.SOURCE_KINDS], re.findall(r'new Kind\("([a-z\-]+)"', java_sources))
+
+check("a spec's kind is its prefix", "cmd", gv.source_kind("cmd:date +%H:%M"))
+check("and a plain name is built-in", "built-in", gv.source_kind("cpu"))
+
+# Switched off means empty, not an error: an applet keeps drawing and the checker is what says why.
+blocked = gv.Values(disabled=["cmd", "file"])
+check("a switched-off kind reads empty", "", blocked.raw("cmd:echo hi"))
+check("and so does a file", "", blocked.raw("file:/proc/loadavg"))
+check("while the rest still read", True, float(blocked.raw("cpu")) >= 0.0)
+
+open_kinds = gv.Values(disabled=[])
+check("with nothing switched off, a command runs", "hi", open_kinds.raw("cmd:echo hi"))
+
+# The same through the file the panel writes, since that is the path that matters.
+os.makedirs("/tmp/visualstest/g13", exist_ok=True)
+with open("/tmp/visualstest/g13/sources.json", "w") as handle:
+    handle.write('{"disabled": ["cmd"]}')
+# Values reads it from the config directory, which this suite pins to /tmp/visualstest.
+check("the daemon reads the file the panel writes", "", gv.Values().raw("cmd:echo hi"))
+check("and the checker's list agrees", ["cmd"], gv.disabled_kinds())
+os.remove("/tmp/visualstest/g13/sources.json")
+check("removing the file switches everything back on", [], gv.disabled_kinds())
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:

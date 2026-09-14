@@ -102,7 +102,7 @@ back after a change, `make enable-services` (or `g13-service start all`). To tak
 | Piece | What it is |
 | --- | --- |
 | `linux-g13-driver` | the driver itself, run as `g13.service` |
-| `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen window |
+| `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen and Sources windows |
 | `g13-visuals` | draws on the screen and runs the menu (`g13-visuals.service`) |
 | `g13-lcd-bridge` | relays a Windows `LogitechLcd.dll` to the driver (`g13-lcd-bridge.service`) |
 | `g13-lcd` / `g13lcd.py` | text, images and frames on the screen, as a tool or an importable module |
@@ -450,6 +450,28 @@ several: `"{day} {date} {time}"`. A worked example ships in
 The daemon publishes what it is drawing to `$XDG_RUNTIME_DIR/g13-screen` and the live
 values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool shows the real
 screen in its preview, and where anything else can read the current values from.
+
+### The config tool's sources window
+
+The **Sources…** button opens what data an applet may read, one switch per kind of source:
+`built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:` and `cmd:`.
+
+An applet is a JSON file, and it can be passed around, so this is where a capability is granted —
+which is why it is a window and not a config key. Everything starts switched on, so an install
+that never opens it behaves exactly as it did before the window existed. A kind that is switched
+off reads as an **empty value** in every applet rather than failing, so nothing breaks and nothing
+has to be restarted: the value simply stops arriving, and `g13-applet check FILE` is what tells you
+which applet was asking for it (`it reads cmd ('cmd:date +%H:%M'), which is switched off in the
+sources panel`). Before switching a kind back on for somebody else's applet, that is the check to
+run first.
+
+The window also shows a line of what is being read right now (`cpu 12%  memory 43%  time 21:14`),
+straight from what the daemon published, so the switches have something visible behind them. From
+a terminal the same thing is `g13-visuals --sources`, `--disable-source cmd`, `--enable-source cmd`,
+and `--status` says when something is switched off. The file is `$XDG_CONFIG_HOME/g13/sources.json`,
+holding a `disabled` list, and the daemon reads it every couple of seconds — a test checks that the
+panel's list of kinds and the daemon's are the same list, because a switch the daemon did not know
+would silently do nothing.
 
 ### The config tool's screen window
 

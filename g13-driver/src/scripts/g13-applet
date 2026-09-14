@@ -247,6 +247,25 @@ def summarise(problems):
     return lines
 
 
+def blocked_problems(visual, daemon):
+    """Sources the applet asks for that are switched off in the sources panel.
+
+    An applet is a file somebody may have been given, and the sources panel is what decides what
+    any applet may read. A kind that is switched off reads empty rather than failing, so without
+    this the only symptom would be a blank on the screen.
+    """
+    off = daemon.disabled_kinds()
+    if not off:
+        return []
+    blocked = {}
+    for spec in visual.sources():
+        kind = daemon.source_kind(spec)
+        if kind in off:
+            blocked.setdefault(kind, spec)
+    return ["it reads %s (%r), which is switched off in the sources panel"
+            % (kind, spec) for kind, spec in sorted(blocked.items())]
+
+
 def check(path, daemon, options):
     """Checks one applet. Returns (problems, visual, values)."""
     try:
@@ -270,6 +289,7 @@ def check(path, daemon, options):
             problems.extend(daemon.layout_problems(visual))
         except Exception as error:
             problems.append("drawing it failed: %s: %s" % (type(error).__name__, error))
+    problems.extend(blocked_problems(visual, daemon))
     return problems, visual, values
 
 

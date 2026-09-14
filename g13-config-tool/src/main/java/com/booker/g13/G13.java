@@ -292,6 +292,12 @@ public class G13 extends JPanel {
 		screenButton.addActionListener(e -> ScreenPanel.showWindow());
 		profilePanel.add(screenButton);
 
+		// What data an applet may read is its own window too, next to it.
+		final JButton sourcesButton = new JButton("Sources\u2026");
+		sourcesButton.setToolTipText("What data an applet may read, and what is switched off");
+		sourcesButton.addActionListener(e -> SourcesPanel.showWindow());
+		profilePanel.add(sourcesButton);
+
 		return profilePanel;
 	}
 

@@ -267,6 +267,47 @@ BUILT_IN_SOURCES = (
 #: Sources that read from outside, named by where they read from rather than by what is there.
 SOURCE_PREFIXES = ("env:", "file:", "cmd:", "json:")
 
+#: The kinds of source an applet may read from, and what each one lets somebody else's applet do.
+#: All of them are on until switched off: a disabled kind reads as empty, exactly like a file that
+#: is not there, so the screen keeps drawing and `g13-applet check` is what tells the author why.
+SOURCE_KINDS = (
+    ("built-in", "the machine's own numbers: cpu, memory, uptime, time, media, profile, keys"),
+    ("env", "environment variables, e.g. env:HOME"),
+    ("file", "the first line of any file, e.g. file:/proc/loadavg"),
+    ("json", "named fields out of a JSON file, e.g. json:/path/to/hud.json#health"),
+    ("cmd", "shell commands, e.g. cmd:date +%H:%M"),
+)
+
+SOURCES_FILE = "sources.json"
+
+
+def source_kind(spec):
+    """Which kind of source a spec is: its prefix, or 'built-in' when it has none."""
+    return spec.split(":", 1)[0] if ":" in spec else "built-in"
+
+
+def disabled_kinds():
+    """The kinds of source applets may not use. Nothing is off until it is switched off."""
+    try:
+        data = json.loads((config_dir() / SOURCES_FILE).read_text())
+        listed = data.get("disabled") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [kind for kind in listed if kind in [name for name, _why in SOURCE_KINDS]]
+
+
+def set_kind_enabled(kind, on):
+    """Switches a kind of source on or off for every applet. Returns the disabled list."""
+    if kind not in [name for name, _why in SOURCE_KINDS]:
+        raise ValueError("no such kind of source: %r" % kind)
+    disabled = [item for item in disabled_kinds() if item != kind]
+    if not on:
+        disabled.append(kind)
+    path = config_dir() / SOURCES_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"disabled": sorted(disabled)}, indent=2) + "\n")
+    return sorted(disabled)
+
 #: The widgets a designed applet may use.
 WIDGET_TYPES = ("text", "bar", "segments", "brackets", "arrow", "turn", "line", "vline", "box")
 
@@ -546,11 +587,26 @@ class Values:
     #: second behind the game because of a cache meant for clocks.
     LIVE_CACHE_SECONDS = 0.2
 
-    def __init__(self, clock=time.monotonic):
+    def __init__(self, clock=time.monotonic, disabled=None):
         self.clock = clock
         self.cache = {}
         self.cpu_previous = None
         self.context = {}
+        #: None means "ask the config file", which is cached: the sources panel runs in another
+        #: process and its switch has to take effect without restarting the daemon.
+        self._fixed_disabled = list(disabled) if disabled is not None else None
+        self._disabled = []
+        self._disabled_at = None
+
+    def blocked_kinds(self):
+        """The kinds of source this applet may not read, read from the config every few seconds."""
+        if self._fixed_disabled is not None:
+            return self._fixed_disabled
+        now = self.clock()
+        if self._disabled_at is None or now - self._disabled_at >= self.CACHE_SECONDS:
+            self._disabled_at = now
+            self._disabled = disabled_kinds()
+        return self._disabled
 
     def set_context(self, **context):
         """State the driver told us about: recording, profile, recent presses."""
@@ -613,6 +669,10 @@ class Values:
         return value
 
     def resolve(self, source):
+        if source_kind(source) in self.blocked_kinds():
+            # Switched off in the sources panel. Empty, like a file that is not there, so the
+            # visual keeps drawing; the panel and `g13-applet check` are what say why.
+            return ""
         now = datetime.now()
         uptime = self.uptime_seconds()
         media, duration = self.media()
@@ -1340,6 +1400,9 @@ CLI_HELP = """g13-visuals - the pad's screen.
     g13-visuals --enable NAME      add it to the ones the pad cycles through
     g13-visuals --disable NAME     take it out of them
     g13-visuals --status           what is showing, who owns the screen, is the daemon up
+    g13-visuals --sources          what data applets may read, and what is switched off
+    g13-visuals --enable-source K  let applets read that kind of source again
+    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd
 
 NAME is a visual's name (clock, system, media, pad, custom), an applet (applet:cp2077-hud, or
 just cp2077-hud), or a title as it appears on the pad.
@@ -1421,6 +1484,22 @@ def cli_list(visuals, values):
     return 0
 
 
+def cli_sources(visuals, values):
+    """What data applets may read, and what each kind is for."""
+    off = disabled_kinds()
+    for kind, why in SOURCE_KINDS:
+        print("  %-10s %-4s %s" % (kind, "off" if kind in off else "on", why))
+    print()
+    if off:
+        print("  applets asking for %s read an empty value, not an error" % ", ".join(off))
+    else:
+        print("  everything an applet can ask for is switched on")
+    if "built-in" not in off:
+        print("  right now:  cpu %s%%   time %s   date %s"
+              % (round(float(values.raw("cpu"))), values.raw("time"), values.raw("date")))
+    return 0
+
+
 def cli_status(visuals, values):
     config = read_config()
     published, age = published_state()
@@ -1440,6 +1519,9 @@ def cli_status(visuals, values):
     print("  screen:    %s   (button mode '%s', %s)"
           % ("an SDK client" if owner == "sdk" else "the visuals", mode,
              "a client is connected" if present else "no client connected"))
+    off = disabled_kinds()
+    if off:
+        print("  sources:   %s switched off for applets" % ", ".join(off))
     if age is None:
         print("  daemon:    not running (nothing published at %s)"
               % runtime_path("g13-values.json"))
@@ -1495,6 +1577,24 @@ def answer(argv, visuals, values):
         return cli_list(visuals, values)
     if action == "status" and not arguments:
         return cli_status(visuals, values)
+    if action == "sources" and not arguments:
+        return cli_sources(visuals, values)
+
+    if action in ("enable-source", "disable-source"):
+        kinds = [name for name, _why in SOURCE_KINDS]
+        if len(arguments) != 1:
+            print("usage: g13-visuals --%s KIND" % action, file=sys.stderr)
+            return 2
+        try:
+            off = set_kind_enabled(arguments[0], action == "enable-source")
+        except ValueError as error:
+            print("%s. Kinds: %s" % (error, ", ".join(kinds)), file=sys.stderr)
+            return 1
+        print("  applets may %s read %s" % ("now" if action == "enable-source" else "no longer",
+                                            arguments[0]))
+        if off:
+            print("  still switched off: %s" % ", ".join(off))
+        return 0
 
     if action in ("select", "enable", "disable"):
         if len(arguments) != 1:

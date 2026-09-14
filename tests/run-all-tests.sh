@@ -64,6 +64,9 @@ run "the screen model (Lcd/LcdFont)" java -Djava.awt.headless=true \
 run "the tool and the daemon draw the same pixels" python3 "$TESTS/frame-check.py"
 run "the screen window and the button mode" env XDG_CONFIG_HOME="$SCRATCH/config" \
     java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" "$TESTS/ScreenPanelTest.java"
+run "the sources panel and what it switches" env XDG_CONFIG_HOME="$SCRATCH/config" \
+    XDG_RUNTIME_DIR="$SCRATCH/run" java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" \
+    "$TESTS/SourcesPanelTest.java"
 
 echo
 echo "The applet tool"
