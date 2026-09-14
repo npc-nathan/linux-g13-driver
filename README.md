@@ -102,7 +102,7 @@ back after a change, `make enable-services` (or `g13-service start all`). To tak
 | Piece | What it is |
 | --- | --- |
 | `linux-g13-driver` | the driver itself, run as `g13.service` |
-| `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen and Sources windows |
+| `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen, Sources and designer windows |
 | `g13-visuals` | draws on the screen and runs the menu (`g13-visuals.service`) |
 | `g13-lcd-bridge` | relays a Windows `LogitechLcd.dll` to the driver (`g13-lcd-bridge.service`) |
 | `g13-lcd` / `g13lcd.py` | text, images and frames on the screen, as a tool or an importable module |
@@ -450,6 +450,26 @@ several: `"{day} {date} {time}"`. A worked example ships in
 The daemon publishes what it is drawing to `$XDG_RUNTIME_DIR/g13-screen` and the live
 values to `$XDG_RUNTIME_DIR/g13-values.json`, which is how the config tool shows the real
 screen in its preview, and where anything else can read the current values from.
+
+### The designer window
+
+**Design…** in the Screen window opens the applet you have selected; **New applet…** starts a new
+one from a template. An applet can be edited by hand in a text editor just as well — the window
+writes the same file, and nothing about it is hidden in the window.
+
+- **Every change is written to the applet's file as it is made.** There is no Apply button and
+  nothing to lose by closing the window.
+- **While it is open, that applet is the one on the pad**, so what you are editing is what you are
+  looking at.
+- **The picture is the daemon's own frame**, read back from the driver, not a second renderer's idea
+  of the design. If the window and the pad could disagree, the window would be lying.
+- **The status line names the final authority**: `g13-applet check <file>` knows the rules the pad
+  has, and it is the thing to run before telling anyone an applet is finished. The designer
+  deliberately does not carry its own copy of those rules.
+- Widgets can be added, removed, duplicated and reordered. The fields offered are the ones the
+  selected widget type actually uses, so a text line never offers a bar's width.
+- **sources** is the applet's own aliases, one `name = spec` per line — this is how an applet says
+  where its numbers come from, including `json:` files written by something else.
 
 ### The config tool's sources window
 

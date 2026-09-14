@@ -257,12 +257,58 @@ public class ScreenPanel extends JPanel {
         final JButton reload = new JButton("Reload");
         reload.addActionListener(e -> reload());
 
-        for (final JButton button : new JButton[]{add, remove, up, down, show, reload}) {
+        final JButton design = new JButton("Design\u2026");
+        design.setToolTipText("Open the selected applet in the designer");
+        design.addActionListener(e -> design());
+
+        final JButton create = new JButton("New applet\u2026");
+        create.setToolTipText("Start a new applet from a template");
+        create.addActionListener(e -> createApplet());
+
+        for (final JButton button : new JButton[]{add, remove, up, down, show, reload, design, create}) {
             button.setAlignmentX(CENTER_ALIGNMENT);
             panel.add(button);
             panel.add(Box.createVerticalStrut(2));
         }
         return panel;
+    }
+
+    /** Opens the designer for the selected applet, wherever the selection is. */
+    private void design() {
+        String name = appletName(availableList.getSelectedValue());
+        if (name == null) {
+            name = appletName(enabledList.getSelectedValue());
+        }
+        if (name == null) {
+            status.setText("pick an applet first \u2014 the designer edits applets, not the built-in visuals");
+            return;
+        }
+        DesignerPanel.showWindow(name);
+    }
+
+    /** Starts a new applet, named by whoever is making it. */
+    private void createApplet() {
+        final String name = JOptionPane.showInputDialog(window,
+                "Name for the new applet (lowercase letters, digits and hyphens):", "");
+        if (name == null || name.isBlank()) {
+            return;
+        }
+        final String clean = name.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!AppletEditor.validName(clean)) {
+            status.setText("'" + clean + "' cannot be a file name \u2014 use lowercase letters, digits and hyphens");
+            return;
+        }
+        if (Files.exists(AppletEditor.path(clean))) {
+            status.setText("'" + clean + "' already exists \u2014 opening it instead");
+        }
+        DesignerPanel.showWindow(clean);
+        reload();
+    }
+
+    /** The applet behind a visual's name, or null when it is not an applet. */
+    private static String appletName(final String visual) {
+        return visual != null && visual.startsWith(Visuals.APPLET_PREFIX)
+                ? visual.substring(Visuals.APPLET_PREFIX.length()) : null;
     }
 
     private void move(final int direction) {
