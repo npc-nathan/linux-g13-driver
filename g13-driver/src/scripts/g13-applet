@@ -325,7 +325,10 @@ def main(argv=None):
             print("  what it reads now:")
             for name in visual.asked_names():
                 spec = visual.spec_of(name)
-                print("    %-16s %-56s %r" % (name, spec[:56], values.raw(spec)))
+                # The end of a source is the part worth reading: the file and the field. A long
+                # path loses its meaning if it is cut off from the right.
+                short = spec if len(spec) <= 56 else "..." + spec[-53:]
+                print("    %-16s %-56s %r" % (name, short, values.raw(spec)))
 
         if options.screen and visual is not None:
             screen = daemon.Screen()
