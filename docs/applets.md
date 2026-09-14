@@ -27,6 +27,7 @@ with any text editor. Both ways are first-class.
   14. [Stop applets reading something](#14-stop-applets-reading-something)
   15. [Add a web address and its token](#15-add-a-web-address-and-its-token)
   16. [A value is blank — find out why](#16-a-value-is-blank--find-out-why)
+  17. [Show something a program can only print](#17-show-something-a-program-can-only-print)
 - Part 2 — Reference
   - [The applet file](#the-applet-file)
   - [The variables](#the-variables)
@@ -489,6 +490,41 @@ In this order, and each step tells you more than the last:
 
 ---
 
+## 17. Show something a program can only print
+
+A game script or a shell loop cannot always write you a file of fields, but it can **print** a line.
+`regex:` reads a pattern out of a text file and gives the **last** match, so a file that grows keeps
+showing the newest reading. This is how a game that can only log gets onto the pad.
+
+1. Make a file the way such a program would:
+
+   ```bash
+   printf 'hp=80\nammo=12\nhp=63\n' > /tmp/game.log
+   ```
+
+2. Read one field out of it:
+
+   ```bash
+   $ g13-visuals --read 'regex:/tmp/game.log#hp=(\d+)'
+     regex:/tmp/game.log#hp=(\d+)
+     -> '63'
+   ```
+
+   `63`, not `80` — the last match wins. **Single quotes matter**: without them the shell eats the
+   backslash and the pattern stops matching.
+
+3. In an applet: add the source, then use it like any other value.
+
+   ```json
+   "sources": { "hp": "regex:/tmp/game.log#hp=(\d+)" },
+   "widgets": [ { "type": "text", "x": 3, "y": 12, "format": "HP: {hp}" } ]
+   ```
+
+The value is the pattern's first capture group, or the whole match when it has no group. Only the
+last 64 KB is read, so a log can grow without limit. If the file is missing, the pattern is invalid,
+or nothing matches, the value is **empty** and the screen keeps drawing — `g13-applet check --values`
+says which of those it was.
+
 # Part 2 — Reference
 
 ## The applet file
@@ -551,10 +587,14 @@ the **Kinds** tab switches.
 | `json:` | one field of a JSON file | `json:/tmp/hud.json#ammo` | 0.2 s |
 | `cmd:` | a shell command's output | `cmd:nproc` | 2 s, 0.4 s to run |
 | `http:` | a value from a web address | `http:ha/api/states/sensor.x#state` | 2 s, 0.5 s to fetch |
+| `regex:` | the last match of a pattern in a text file | `regex:/tmp/game.log#hp=(\d+)` | 0.2 s |
 
 `json:` and `http:` walk into their data with `#field`: `#hud.ammo` for a nested object, `#route.0`
 for the first item of a list. Anything missing or unreadable reads as **empty** — never an error on
 the screen.
+
+`regex:` takes `#<pattern>`, not a field: the pattern is a regular expression and the value is the
+last match in the file, which is what makes a log that grows show the newest reading.
 
 ## The widgets and their fields
 

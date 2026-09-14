@@ -29,6 +29,7 @@ Visuals:
 import json
 import math
 import os
+import re
 import socket
 import string
 import http.client
@@ -280,6 +281,7 @@ SOURCE_KINDS = (
     ("cmd", "shell commands, e.g. cmd:date +%H:%M"),
     ("http", "web addresses, e.g. http:weather/now#temp; the address and any token are named "
              "in endpoints.json, never in the applet"),
+    ("regex", "a pattern out of a text file, e.g. regex:/tmp/game.log#health=(\\d+)"),
 )
 
 SOURCES_FILE = "sources.json"
@@ -288,6 +290,9 @@ ENDPOINTS_FILE = "endpoints.json"
 #: How long to wait for a web address before giving up on it. Short on purpose: the daemon draws
 #: the screen on one thread, so a slow endpoint is a slow pad.
 HTTP_TIMEOUT = 0.5
+
+#: How much of a text file `regex:` looks at, counted from the end: logs grow without limit.
+REGEX_TAIL_BYTES = 65536
 
 #: The most of a response to read, so an endpoint that streams something huge cannot fill memory.
 HTTP_LIMIT = 65536
@@ -787,7 +792,42 @@ class Values:
         if source.startswith("http:"):
             return self.http_field(source)
 
+        if source.startswith("regex:"):
+            return self.regex_field(source[6:])
+
         return ""
+
+    def regex_field(self, spec):
+        """A pattern out of a text file: `regex:<path>#<pattern>`, e.g. regex:/tmp/game.log#hp=(\\d+).
+
+        For anything that can only *print* rather than write JSON - a game script, a log, a shell
+        loop. The pattern is a Python regular expression and the value is the last match in the
+        file, so a log that grows keeps giving the newest reading. Only the tail is read (a log can
+        be enormous and the daemon redraws every second), the first `#` separates the path from the
+        pattern, and with no capture group the whole match is the value. As everywhere else here: a
+        missing file, an unreadable one, a bad pattern or no match at all read as empty, because a
+        game that is not running must leave the screen blank rather than take anything down.
+        """
+        path, _, pattern = spec.partition("#")
+        if not pattern:
+            return ""
+        try:
+            with open(os.path.expanduser(path), "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - REGEX_TAIL_BYTES))
+                text = handle.read().decode("utf-8", "replace")
+        except OSError:
+            return ""
+        try:
+            matches = re.findall(pattern, text)
+        except re.error:
+            return ""
+        if not matches:
+            return ""
+        last = matches[-1]
+        if isinstance(last, tuple):
+            last = last[0] if last else ""
+        return last if isinstance(last, (str, int, float)) else ""
 
     def json_field(self, spec):
         """One field of a JSON file: `json:<path>#<field>`, e.g. json:/tmp/hud.json#ammo.
@@ -1551,8 +1591,9 @@ CLI_HELP = """g13-visuals - the pad's screen.
     g13-visuals --status           what is showing, who owns the screen, is the daemon up
     g13-visuals --sources          what data applets may read, and what is switched off
     g13-visuals --enable-source K  let applets read that kind of source again
-    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http
+    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http, regex
     g13-visuals --read SPEC        read one source, exactly as an applet would see it
+                                   (put a text-log pattern in quotes: --read 'regex:/tmp/x.log#hp=(\\d+)')
 
 NAME is a visual's name (clock, system, media, pad, custom), an applet (applet:cp2077-hud, or
 just cp2077-hud), or a title as it appears on the pad.

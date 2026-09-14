@@ -50,6 +50,7 @@ public class Sources {
         new Kind("cmd", "shell commands, e.g. cmd:date +%H:%M"),
         new Kind("http", "web addresses, e.g. http:weather/now#temp; the address and any token "
                 + "are named in endpoints.json, never in the applet"),
+        new Kind("regex", "a pattern out of a text file, e.g. regex:/tmp/game.log#health=(\\d+)"),
     };
 
     /** The file the daemon reads. */

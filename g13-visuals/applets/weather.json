@@ -1,0 +1,33 @@
+{
+  "name": "weather",
+  "title": "WEATHER",
+  "interval": 1,
+  "border": true,
+  "sources": {
+    "temp": "http:weather/London?format=j1#current_condition.0.temp_C",
+    "feels": "http:weather/London?format=j1#current_condition.0.FeelsLikeC",
+    "desc": "http:weather/London?format=j1#current_condition.0.weatherDesc.0.value",
+    "wind": "http:weather/London?format=j1#current_condition.0.windspeedKmph",
+    "humidity": "http:weather/London?format=j1#current_condition.0.humidity"
+  },
+  "widgets": [
+    {
+      "type": "text",
+      "x": 3,
+      "y": 12,
+      "format": "{desc} {temp}C"
+    },
+    {
+      "type": "text",
+      "x": 3,
+      "y": 22,
+      "format": "feels {feels}C"
+    },
+    {
+      "type": "text",
+      "x": 3,
+      "y": 32,
+      "format": "wind {wind} hum {humidity}%"
+    }
+  ]
+}

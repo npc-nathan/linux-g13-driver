@@ -804,6 +804,27 @@ check("http: an applet draws a value from a web address", True,
       any(message.startswith("21C") for _x, _y, message in _over_http_screen.texts))
 _over_http_applet.unlink()
 
+# regex: a pattern out of a text file, for anything that can only print rather than write JSON.
+_regex_log = "/tmp/g13-regex-test.log"
+open(_regex_log, "w").write("loading\nhp=80\nammo=12\nhp=63\n")
+check("regex: gives the last match in the file, not the first", "63",
+      gv.Values().raw("regex:%s#hp=(\\d+)" % _regex_log))
+check("regex: with no capture group gives the whole match", "hp=63",
+      gv.Values().raw("regex:%s#hp=\\d+" % _regex_log))
+check("regex: a pattern that matches nothing reads empty", "",
+      gv.Values().raw("regex:%s#mana=(\\d+)" % _regex_log))
+check("regex: a file that is not there reads empty", "",
+      gv.Values().raw("regex:/tmp/g13-no-such-log.log#hp=(\\d+)"))
+check("regex: an invalid pattern reads empty instead of stopping anything", "",
+      gv.Values().raw("regex:%s#hp=([\\d+" % _regex_log))
+check("regex: switched off in the panel, applets read none of it", "",
+      gv.Values(disabled=["regex"]).raw("regex:%s#hp=(\\d+)" % _regex_log))
+open(_regex_log, "w").write("early=11\n" + ("x" * 200000) + "\nlate=77\n")
+check("regex: only the tail is read, so a huge log still works", "77",
+      gv.Values().raw("regex:%s#late=(\\d+)" % _regex_log))
+check("regex: a match left outside the tail is not found", "",
+      gv.Values().raw("regex:%s#early=(\\d+)" % _regex_log))
+
 # --- g13-visuals --read: the command the sources window's Test button runs ---------------------
 # It has to be the daemon's own reader, or a Test button could pass while the pad shows nothing.
 _daemon_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "g13-visuals",
