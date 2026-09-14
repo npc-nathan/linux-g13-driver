@@ -376,6 +376,22 @@ screen once it is running. Buttons on the pad drive it:
 | **L2** / **L3** | up / down |
 | **L4** | select |
 
+The same choices from a terminal. This edits the same `visuals.json` the daemon reads about once
+a second, so nothing talks to a running daemon and none of it needs one — a change made with no
+daemon running is what it shows next time it starts.
+
+```bash
+g13-visuals --list                       # what can be shown, and what is switched on
+g13-visuals --select night-city          # show it now: name, file name, or the title on the pad
+g13-visuals --enable clock               # add it to what the round button cycles through
+g13-visuals --disable media              # take it out
+g13-visuals --status                     # what is showing, who owns the screen, is the daemon up
+```
+
+`--list` marks the one that is showing, and when an applet's file name differs from the name
+inside it, shows both (`applet:demo-stats  (example-stats.json)`). A name that does not exist is
+an error with a suggestion rather than a guess.
+
 Visuals: `clock`, `system` (cpu, memory, load, uptime), `media` (whatever `playerctl`
 reports), `pad` (active profile, recording state, recent presses) and `custom` (four lines
 from `$XDG_CONFIG_HOME/g13/screen.txt`, so anything that can write a file can drive the

@@ -38,7 +38,13 @@ from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import g13lcd
+try:
+    import g13lcd
+except ImportError:
+    # Run from the repository rather than from ~/.local/bin, where g13lcd.py sits alongside.
+    # Without this the daemon and its command line only work once installed.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "g13-driver" / "src" / "scripts"))
+    import g13lcd
 
 # --- device buttons ---
 MENU_BUTTON = 24        # G24, the round button left of the screen
@@ -1315,6 +1321,196 @@ def config_supersedes(engine, fresh):
             or set(fresh.visuals) != set(engine.visuals))
 
 
+CLI_HELP = """g13-visuals - the pad's screen.
+
+    g13-visuals                    run the daemon: this is what the service does
+    g13-visuals --list             what can be shown, and what is switched on
+    g13-visuals --select NAME      show this one now, switching it on if it is off
+    g13-visuals --enable NAME      add it to the ones the pad cycles through
+    g13-visuals --disable NAME     take it out of them
+    g13-visuals --status           what is showing, who owns the screen, is the daemon up
+
+NAME is a visual's name (clock, system, media, pad, custom), an applet (applet:cp2077-hud, or
+just cp2077-hud), or a title as it appears on the pad.
+
+Everything here edits the same visuals.json the daemon reads about once a second, so nothing
+talks to a running daemon and none of it needs one: a change made with no daemon running is what
+it shows the next time it starts.
+"""
+
+
+def applet_files(directory=None):
+    """{visual name: file} for the applets on disk.
+
+    A file's name and the name inside it can differ - `example-stats.json` calls itself
+    `demo-stats` - and the file is what somebody types, so both have to be answerable.
+    """
+    files = {}
+    for path in sorted((directory or applet_dir()).glob("*.json")):
+        try:
+            definition = json.loads(path.read_text())
+            name = definition.get("name") or path.stem
+        except (OSError, ValueError, AttributeError):
+            name = path.stem
+        files[APPLET_PREFIX + str(name)] = path
+    return files
+
+
+def find_visual(name, visuals, files=None):
+    """A visual by its name, its applet's file name, or its title as shown on the pad."""
+    files = applet_files() if files is None else files
+    for candidate in (name, APPLET_PREFIX + name):
+        if candidate in visuals:
+            return candidate
+    for visual_name, path in files.items():
+        if visual_name in visuals and name in (path.stem, path.name):
+            return visual_name
+    for visual_name in visuals:
+        if visual_name.split(":")[-1] == name:
+            return visual_name
+    titled = [candidate for candidate in visuals
+              if str(getattr(visuals[candidate], "title", "")).lower() == name.lower()]
+    return titled[0] if len(titled) == 1 else None
+
+
+def near_misses(name, visuals):
+    """Names close enough to be what somebody meant, for the error message."""
+    lowered = name.lower()
+    return sorted(candidate for candidate in visuals
+                  if lowered in candidate.lower() or candidate.split(":")[-1].lower() in lowered)
+
+
+def published_state():
+    """What the running daemon last published, and how long ago, or ({}, None) if it is not."""
+    path = runtime_path("g13-values.json")
+    try:
+        age = time.time() - os.stat(path).st_mtime
+        return json.loads(Path(path).read_text()), age
+    except (OSError, ValueError):
+        return {}, None
+
+
+def cli_list(visuals, values):
+    config = read_config()
+    enabled = config.get("enabled") or list(visuals)
+    active = config.get("active")
+    files = applet_files()
+    for name in sorted(visuals, key=lambda item: (item not in enabled, str(item))):
+        path = files.get(name)
+        showed_as = ""
+        if path and path.stem != name.split(":")[-1]:
+            showed_as = "  (%s)" % path.name
+        print("  %s %-22s %-24s %-4s%s" % ("*" if name == active else " ", name,
+                                           str(getattr(visuals[name], "title", ""))[:24],
+                                           "on" if name in enabled else "off", showed_as))
+    print()
+    print("  %d of %d switched on; showing %s"
+          % (len([name for name in visuals if name in enabled]), len(visuals),
+             active or "nothing"))
+    return 0
+
+
+def cli_status(visuals, values):
+    config = read_config()
+    published, age = published_state()
+    active = config.get("active")
+    title = getattr(visuals.get(active), "title", "")
+    enabled = [name for name in visuals
+               if name in (config.get("enabled") or list(visuals))]
+
+    mode = button_mode()
+    present = sdk_client_present()
+    owner = published.get("screen_owner") or ("sdk" if should_pause(mode, present) else "visuals")
+    print("  showing:   %s%s" % (active or "nothing", "  (%s)" % title if title else ""))
+    print("  switched:  %d of %d on%s"
+          % (len(enabled), len(visuals),
+             ", cycling every %.0fs" % float(config.get("cycle_seconds", 10))
+             if config.get("cycle") else ", cycling off"))
+    print("  screen:    %s   (button mode '%s', %s)"
+          % ("an SDK client" if owner == "sdk" else "the visuals", mode,
+             "a client is connected" if present else "no client connected"))
+    if age is None:
+        print("  daemon:    not running (nothing published at %s)"
+              % runtime_path("g13-values.json"))
+    else:
+        print("  daemon:    running, last drew %.1fs ago" % age)
+    return 0
+
+
+def set_enabled(name, on, visuals):
+    """Switches a visual on or off, and moves the showing one if it was switched off."""
+    config = read_config()
+    was_showing = config.get("active") == name
+    enabled = [item for item in (config.get("enabled") or list(visuals)) if item != name]
+    if on:
+        enabled.append(name)
+    config["enabled"] = enabled
+    if config.get("active") not in enabled:
+        config["active"] = enabled[0] if enabled else config.get("active")
+    write_config(config)
+    print("  %s is %s" % (name, "switched on" if on else "switched off"))
+    if not on and was_showing:
+        print("  (it was showing, so the screen moves to %s)" % config.get("active"))
+    return 0
+
+
+def cli_select(name, visuals):
+    config = read_config()
+    enabled = config.get("enabled") or list(visuals)
+    if name not in enabled:
+        print("  %s was switched off; switching it on so it stays" % name)
+        set_enabled(name, True, visuals)
+        config = read_config()
+    config["active"] = name
+    write_config(config)
+    _, age = published_state()
+    print("  showing %s" % name)
+    if age is None:
+        print("  (no daemon is running; this is what it shows when one is)")
+    return 0
+
+
+def answer(argv, visuals, values):
+    """Answers the command line. Returns an exit code."""
+    words = list(argv)
+    if words[0] in ("-h", "--help", "help"):
+        print(CLI_HELP, end="")
+        return 0
+
+    action = words[0].lstrip("-")
+    arguments = words[1:]
+
+    if action == "list" and not arguments:
+        return cli_list(visuals, values)
+    if action == "status" and not arguments:
+        return cli_status(visuals, values)
+
+    if action in ("select", "enable", "disable"):
+        if len(arguments) != 1:
+            print("usage: g13-visuals --%s NAME" % action, file=sys.stderr)
+            return 2
+        name = find_visual(arguments[0], visuals)
+        if name is None:
+            print("no visual called %r. Try --list." % arguments[0], file=sys.stderr)
+            close = near_misses(arguments[0], visuals)
+            if close:
+                print("  did you mean: %s" % ", ".join(close[:6]), file=sys.stderr)
+            return 1
+        return cli_select(name, visuals) if action == "select" else set_enabled(
+            name, action == "enable", visuals)
+
+    print("g13-visuals: %r is not a command. Try --help." % words[0], file=sys.stderr)
+    return 2
+
+
+def run_or_answer(argv):
+    """Answers argv, or returns None to mean: no command line, so be the daemon."""
+    if not argv:
+        return None
+    values = Values()
+    return answer(argv, registry(values), values)
+
+
 def main():
     values = Values()
     try:
@@ -1460,6 +1656,10 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        code = run_or_answer(sys.argv[1:])
+        if code is None:
+            main()
+        else:
+            sys.exit(code)
     except KeyboardInterrupt:
         pass

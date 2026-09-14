@@ -267,6 +267,88 @@ for name in gv.BUILT_IN_SOURCES:
         failure = "%s: %s" % (type(error).__name__, error)
     check("the tool's built-in source %r really resolves" % name, None, failure)
 
+# --- the daemon's own command line ----------------------------------------------------------
+# It edits the same visuals.json the daemon reads, so these run the command for real with a
+# scratch config and runtime directory, and then look at what it wrote.
+import shutil
+import subprocess
+import sys
+
+DAEMON = os.path.join(REPO, "g13-visuals", "g13-visuals")
+CLI = "/tmp/visualstest/cli"
+shutil.rmtree(CLI, ignore_errors=True)
+os.makedirs(CLI + "/g13/applets", exist_ok=True)
+os.makedirs(CLI + "/run", exist_ok=True)
+APPLET_SOURCE = sorted(glob.glob(os.path.join(REPO, "g13-visuals", "applets", "*.json")))[0]
+shutil.copy(APPLET_SOURCE, CLI + "/g13/applets/")
+APPLET_NAME = json.load(open(APPLET_SOURCE)).get("name", "applet")
+APPLET_TITLE = json.load(open(APPLET_SOURCE)).get("title", "APPLET")
+
+
+def cli(*arguments):
+    environment = dict(os.environ, XDG_CONFIG_HOME=CLI, XDG_RUNTIME_DIR=CLI + "/run")
+    result = subprocess.run([sys.executable, DAEMON, *arguments], capture_output=True,
+                            text=True, timeout=120, env=environment)
+    return result.returncode, result.stdout + result.stderr
+
+
+def cli_config():
+    return json.load(open(CLI + "/g13/visuals.json"))
+
+
+code, output = cli("--help")
+check("the daemon answers --help", 0, code)
+check("and lists what it can do", True, all(word in output for word in
+                                            ("--list", "--select", "--enable", "--disable", "--status")))
+code, output = cli("--list")
+check("--list works", 0, code)
+check("it names the visuals", True, "clock" in output and "applet:" + APPLET_NAME in output)
+check("and says how many are on", True, "switched on" in output)
+
+code, output = cli("--select", "clock")
+check("--select works", 0, code)
+check("and the file agrees", "clock", cli_config()["active"])
+
+code, output = cli("--list")
+check("the showing one is marked", True, "* clock" in output)
+
+code, output = cli("--select", os.path.basename(APPLET_SOURCE))
+check("--select takes the applet's file name", 0, code)
+check("and resolves it to the visual's own name", "applet:" + APPLET_NAME, cli_config()["active"])
+
+code, output = cli("--select", APPLET_TITLE.lower())
+check("--select takes the title as shown on the pad", 0, code)
+check("and lands on the same visual", "applet:" + APPLET_NAME, cli_config()["active"])
+
+code, output = cli("--select", "clockk")
+check("an unknown name fails", 1, code)
+check("and suggests the near miss", True, "did you mean" in output and "clock" in output)
+
+code, output = cli("--select")
+check("a missing name is a usage error", 2, code)
+
+code, output = cli("--bogus")
+check("an unknown command is a usage error", 2, code)
+
+code, output = cli("--disable", "applet:" + APPLET_NAME)
+check("--disable works", 0, code)
+check("and takes it out of the list", False, "applet:" + APPLET_NAME in cli_config()["enabled"])
+code, output = cli("--enable", "applet:" + APPLET_NAME)
+check("--enable puts it back", True, "applet:" + APPLET_NAME in cli_config()["enabled"])
+
+cli("--select", "clock")
+code, output = cli("--disable", "clock")
+check("switching off what is showing moves the screen", True,
+      "screen moves to" in output and cli_config()["active"] != "clock")
+
+code, output = cli("--status")
+check("--status works with no daemon running", 0, code)
+check("and says so rather than guessing", True, "not running" in output)
+check("it reports what is showing", True, "showing" in output)
+check("and who owns the screen", True, "screen:" in output)
+
+check("none of that started a daemon", 0, code)
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:
