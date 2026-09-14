@@ -146,6 +146,22 @@ def main():
     check("--all with nothing there says so", 2, code)
     check("and tells you where it looked", True, "applets" in output)
 
+    # --json is what a build script reads, so it has to carry the same problems the human output
+    # does. It used to report the structural ones only, which told a script that an applet drawn
+    # on top of itself was clean - the layout half is the half the pad actually shows.
+    on_a_box = os.path.join(scratch, "on-a-box.json")
+    with open(on_a_box, "w") as handle:
+        json.dump({"name": "on-a-box", "title": "BOX", "widgets": [
+            {"type": "box", "x": 20, "y": 10, "w": 120, "h": 12},
+            {"type": "text", "x": 30, "y": 12, "format": "over the box"}]}, handle)
+    code, output = run("check", on_a_box, "--json")
+    check("--json: a broken applet is not reported clean", 1, code)
+    reported = json.loads(output[output.index("{"):]) if "{" in output else {}
+    check("--json: and the layout problem is in it", True,
+          any("sits on" in problem for problems in reported.values() for problem in problems))
+    code, output = run("check", on_a_box, "--screen")
+    check("and the same applet fails without --json too", 1, code)
+
     shutil.rmtree(scratch, ignore_errors=True)
     print("APPLET TOOL TEST: all checks passed" if failures == 0
           else "APPLET TOOL TEST: %d FAILURES" % failures)

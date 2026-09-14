@@ -418,6 +418,10 @@ enforced by the tests, not just by convention.
 
 ### Designed applets
 
+An applet is a JSON file that draws things on the screen, bound to values. The whole of it — the
+tutorials, the variables, the widgets and their fields, the sources, and what to do when a value is
+blank — is in **[docs/applets.md](docs/applets.md)**. This section is the summary.
+
 An applet is a JSON file in `$XDG_CONFIG_HOME/g13/applets/`: widgets placed on the screen
 and bound to live data. It appears in the menu under its `title` as soon as it is listed in
 `enabled` in `visuals.json`.
@@ -456,6 +460,8 @@ screen in its preview, and where anything else can read the current values from.
 
 ### The designer window
 
+*(Part of [docs/applets.md](docs/applets.md), which has the tutorials.)*
+
 **Design…** in the Screen window opens the applet you have selected; **New applet…** starts a new
 one from a template. An applet can be edited by hand in a text editor just as well — the window
 writes the same file, and nothing about it is hidden in the window.
@@ -482,6 +488,8 @@ writes the same file, and nothing about it is hidden in the window.
   where its numbers come from, including `json:` files written by something else.
 
 ### The config tool's sources window
+
+*(Part of [docs/applets.md](docs/applets.md): [Stop applets reading something](docs/applets.md#14-stop-applets-reading-something).)*
 
 The **Sources…** button opens what data an applet may read, one switch per kind of source:
 `built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:`, `cmd:` and

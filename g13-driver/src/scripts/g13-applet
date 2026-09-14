@@ -302,11 +302,13 @@ def check(path, daemon, options):
         problems.append("the daemon cannot build this applet: %s: %s"
                         % (type(error).__name__, error))
         return problems, None, values
-    if not options.json_only:
-        try:
-            problems.extend(daemon.layout_problems(visual))
-        except Exception as error:
-            problems.append("drawing it failed: %s: %s" % (type(error).__name__, error))
+    # Every problem, whichever way the answer is asked for. --json used to report the structural
+    # ones only, so a build script was told a broken applet was clean: the layout half - text on
+    # ink, text off the screen - is the half that matters most, since that is what the pad shows.
+    try:
+        problems.extend(daemon.layout_problems(visual))
+    except Exception as error:
+        problems.append("drawing it failed: %s: %s" % (type(error).__name__, error))
     problems.extend(blocked_problems(visual, daemon))
     return problems, visual, values
 

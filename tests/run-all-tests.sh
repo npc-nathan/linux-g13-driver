@@ -77,6 +77,8 @@ run "the designer's model, and the applet it writes" env XDG_CONFIG_HOME="$SCRAT
 run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/designer" \
     python3 "$SCRIPTS/g13-applet" check --all
 
+run "the guide agrees with the code" python3 "$TESTS/DocTest.py"
+
 echo
 echo "The applet tool"
 run "checking applets, and the lists it checks against" python3 "$TESTS/AppletToolTest.py"
