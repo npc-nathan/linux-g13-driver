@@ -56,6 +56,8 @@ public class Sources {
         new Kind("ws", "the last message from a web socket, e.g. ws:obs#d.settings; the address, "
                 + "anything to send on connect and any credential are named in endpoints.json, "
                 + "never in the applet"),
+        new Kind("imap", "a mailbox, e.g. imap:mail/INBOX#unread or #subject; the server, "
+                + "the login and the password are named in endpoints.json, never in the applet"),
     };
 
     /** The file the daemon reads. */

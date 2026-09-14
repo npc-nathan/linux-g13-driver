@@ -30,6 +30,7 @@ with any text editor. Both ways are first-class.
   17. [Show something a program can only print](#17-show-something-a-program-can-only-print)
   18. [Show what an MQTT topic says](#18-show-what-an-mqtt-topic-says)
   19. [Show what a web socket says](#19-show-what-a-web-socket-says)
+  20. [Show what a mailbox says](#20-show-what-a-mailbox-says)
 - Part 2 — Reference
   - [The applet file](#the-applet-file)
   - [The variables](#the-variables)
@@ -590,6 +591,40 @@ Like MQTT, the socket is opened when an applet first asks for it and the last me
 value appears a fraction of a second after it arrives, and a server that is down leaves the value
 blank instead of holding up the screen.
 
+## 20. Show what a mailbox says
+
+`imap:` reads a mailbox directly — no mail client installed, nothing marked read.
+
+1. Put the server, the login and the password in `~/.config/g13/endpoints.json`. A password made for
+   this purpose (an app password) is better than your account password:
+
+   ```json
+   { "mail": { "url": "imaps://imap.purelymail.com:993", "user": "me@example.com", "token": "…" } }
+   ```
+
+   `imaps://` is TLS; plain `imap://` is only for a server you reach over something already private.
+
+2. Read a count, or the newest message:
+
+   ```bash
+   $ g13-visuals --read 'imap:mail/INBOX#unread'
+     imap:mail/INBOX#unread
+     -> 7
+   $ g13-visuals --read 'imap:mail/INBOX#line'
+     imap:mail/INBOX#line
+     -> 'Alice Example - Hello world'
+   ```
+
+   Fields: `unread`, `total`, and `from`, `subject`, `date` or `line` for the newest message. A
+   MIME-encoded subject is decoded, so an accent or a name in another script looks right.
+
+3. In an applet: `mail = imap:mail/INBOX#unread`, then `format: "mail {mail}"`.
+
+Two things worth knowing: the mailbox is opened **read-only**, so nothing here ever marks a message
+as read, and the answer is refreshed once a **minute** rather than every second — a mail server is
+not a file and should not be asked that often. Until the endpoint is configured, or if the server
+cannot be reached, the value is blank.
+
 # Part 2 — Reference
 
 ## The applet file
@@ -660,6 +695,7 @@ for anything that touches the network - that is what `http:`, `mqtt:` and `ws:` 
 | `regex:` | the last match of a pattern in a text file | `regex:/tmp/game.log#hp=(\d+)` | 0.2 s |
 | `mqtt:` | the last message on a topic | `mqtt:home/sensors/kitchen#state` | instant (pushed) |
 | `ws:` | the last message from a web socket | `ws:obs#d.settings` | instant (pushed) |
+| `imap:` | a mailbox's unread count, or the newest sender | `imap:mail/INBOX#unread` | 60 s |
 
 `json:` and `http:` walk into their data with `#field`: `#hud.ammo` for a nested object, `#route.0`
 for the first item of a list. Anything missing or unreadable reads as **empty** — never an error on

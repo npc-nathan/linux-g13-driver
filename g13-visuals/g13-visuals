@@ -26,6 +26,8 @@ Visuals:
     pad      active profile and the last few button presses
     custom   five lines from $XDG_CONFIG_HOME/g13/screen.txt
 """
+import email
+import imaplib
 import json
 import math
 import os
@@ -289,6 +291,9 @@ SOURCE_KINDS = (
              "any credential are named in endpoints.json, never in the applet"),
     ("ws", "the last message from a web socket, e.g. ws:obs#d.settings; the address, anything to "
            "send on connect and any credential are named in endpoints.json, never in the applet"),
+    ("imap", "a mailbox's count, e.g. imap:mail/INBOX#unread, or the newest message's #from, "
+             "#subject or #date; the server, the login and the password are named in "
+             "endpoints.json, never in the applet"),
 )
 
 SOURCES_FILE = "sources.json"
@@ -1104,6 +1109,182 @@ def ws_value(spec, entries):
         return ""
 
 
+# ---------------------------------------------------------------- mail
+#
+# `imap:<endpoint>/<mailbox>#<field>` shows a mailbox without a mail client: how many are unread,
+# or who the newest one is from. The server, the login and the password are named in endpoints.json
+# like every other address here, so nothing secret is ever in an applet:
+#
+#   { "mail": { "url": "imaps://imap.example.com:993", "user": "me@example.com", "token": "..." } }
+#
+# Fields: `unread` (how many are unseen), `total`, and `from`, `subject`, `date` or `line` for the
+# newest message. `unread` comes from a search, `total` from the mailbox itself, and the newest
+# message's headers are fetched with PEEK - **nothing here ever marks a message read**, which would
+# be a rude thing for a screen to do.
+#
+# A mailbox cannot be asked every two seconds the way a file can: the result is refreshed on a
+# thread once a minute, and a value is whatever the last successful look found. No such endpoint, a
+# refused login, a server that is down or a field this does not know all read as empty, exactly
+# like everywhere else in this file.
+
+IMAP_CACHE_SECONDS = 60
+IMAP_TIMEOUT = 20
+
+
+def imap_headers(raw):
+    """FROM, SUBJECT and DATE out of a FETCH response, with MIME-encoded words decoded.
+
+    `decode_header` is what turns `=?utf-8?B?...?=` back into text; a subject with an accent or a
+    name in a script that is not Latin arrives that way, and printing it raw would be a mess.
+    """
+    text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+    found = {}
+    for line in text.splitlines():
+        for name in ("From", "Subject", "Date"):
+            if line.lower().startswith(name.lower() + ":"):
+                value = line.split(":", 1)[1].strip()
+                try:
+                    pieces = email.header.decode_header(value)
+                    value = " ".join(piece.decode(charset or "utf-8", "replace")
+                                     if isinstance(piece, bytes) else piece
+                                     for piece, charset in pieces)
+                except (email.errors.HeaderParseError, LookupError, UnicodeDecodeError):
+                    pass
+                found[name.lower()] = value.strip()
+    address = found.get("from", "")
+    if address:
+        name, mail = email.utils.parseaddr(address)
+        found["from"] = name or mail or address
+    return found
+
+
+class ImapMailbox:
+    """One mailbox: looked at when first asked for, refreshed once a minute, never marked read."""
+
+    def __init__(self, name, url, user="", token=""):
+        self.name = name
+        self.host, self.port, self.secure = self._address(url)
+        self.user = user
+        self.token = token
+        self.values = {}
+        self.wanted = set()             # (mailbox, field) pairs an applet has asked for
+        self.armed = False
+        self.thread = None
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _address(url):
+        rest, secure = url, False
+        for scheme in ("imaps://", "imap://", "ssl://"):
+            if rest.startswith(scheme):
+                secure = scheme in ("imaps://", "ssl://")
+                rest = rest[len(scheme):]
+                break
+        rest = rest.rstrip("/")
+        host, _, port = rest.partition(":")
+        return host, int(port) if port.isdigit() else (993 if secure else 143), secure
+
+    def ask_for(self, mailbox, field):
+        with self.lock:
+            self.wanted.add((mailbox, field))
+            first = not self.armed
+            self.armed = True
+        if first:
+            self.thread = threading.Thread(target=self._run, name="imap-%s" % self.name, daemon=True)
+            self.thread.start()
+
+    def value(self, mailbox, field):
+        with self.lock:
+            return self.values.get((mailbox, field), "")
+
+    def _look(self, mailbox):
+        """One look at a mailbox: (unread, total, headers). Raises on anything unexpected."""
+        if self.secure:
+            server = imaplib.IMAP4_SSL(self.host, self.port, timeout=IMAP_TIMEOUT)
+        else:
+            server = imaplib.IMAP4(self.host, self.port, timeout=IMAP_TIMEOUT)
+        try:
+            server.login(self.user, self.token)
+            status, data = server.select(mailbox, readonly=True)
+            if status != "OK":
+                raise OSError("cannot select %s" % mailbox)
+            total = int(data[0]) if data and data[0] else 0
+            status, data = server.uid("SEARCH", None, "UNSEEN")
+            unread = len(data[0].split()) if status == "OK" and data and data[0] else 0
+            headers = {}
+            status, data = server.uid("SEARCH", None, "ALL")
+            if status == "OK" and data and data[0]:
+                newest = data[0].split()[-1]
+                status, data = server.uid(
+                    "FETCH", newest, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
+                if status == "OK" and data and isinstance(data[0], tuple):
+                    headers = imap_headers(data[0][1])
+            return unread, total, headers
+        finally:
+            try:
+                server.logout()
+            except (imaplib.IMAP4.error, OSError):
+                pass
+
+    def _run(self):
+        while True:
+            with self.lock:
+                wanted = sorted(self.wanted)
+            for mailbox, field in wanted:
+                try:
+                    unread, total, headers = self._look(mailbox)
+                except (imaplib.IMAP4.error, OSError, ValueError, ssl.SSLError):
+                    continue                       # leave the last good answer in place
+                with self.lock:
+                    self.values[(mailbox, "unread")] = unread
+                    self.values[(mailbox, "total")] = total
+                    for key in ("from", "subject", "date"):
+                        if key in headers:
+                            self.values[(mailbox, key)] = headers[key]
+                    if "from" in headers or "subject" in headers:
+                        self.values[(mailbox, "line")] = (
+                            ("%s - " % headers["from"] if headers.get("from") else "")
+                            + headers.get("subject", "")).strip(" -")
+            time.sleep(IMAP_CACHE_SECONDS)
+
+
+IMAP_MAILBOXES = {}
+
+
+def imap_mailbox_for(name, entries):
+    """The mailbox `<name>` means, from the same endpoints.json the others use."""
+    if name in IMAP_MAILBOXES:
+        return IMAP_MAILBOXES[name]
+    entry = entries.get(name)
+    if not isinstance(entry, dict):
+        return None
+    url = str(entry.get("url", ""))
+    if not url.startswith(("imaps://", "imap://", "ssl://")):
+        return None
+    mailbox = ImapMailbox(name, url, str(entry.get("user", "")), str(entry.get("token", "")))
+    IMAP_MAILBOXES[name] = mailbox
+    return mailbox
+
+
+def imap_value(spec, entries):
+    """`imap:<endpoint>/<mailbox>#<field>` -> a count, or something about the newest message."""
+    rest = spec[len("imap:"):]
+    address, separator, field = rest.rpartition("#")
+    if not separator:
+        return ""
+    endpoint, slash, mailbox = address.partition("/")
+    if not slash:
+        endpoint, mailbox = address, "INBOX"
+    mailbox = mailbox or "INBOX"
+    if field not in ("unread", "total", "from", "subject", "date", "line"):
+        return ""
+    mailbox_for = imap_mailbox_for(endpoint, entries)
+    if mailbox_for is None:
+        return ""
+    mailbox_for.ask_for(mailbox, field)
+    return mailbox_for.value(mailbox, field)
+
+
 class Values:
     """The live numbers and strings an applet can put on the screen.
 
@@ -1276,6 +1457,9 @@ class Values:
 
         if source.startswith("ws:"):
             return ws_value(source, self.endpoints())
+
+        if source.startswith("imap:"):
+            return imap_value(source, self.endpoints())
 
         return ""
 
@@ -2073,7 +2257,7 @@ CLI_HELP = """g13-visuals - the pad's screen.
     g13-visuals --status           what is showing, who owns the screen, is the daemon up
     g13-visuals --sources          what data applets may read, and what is switched off
     g13-visuals --enable-source K  let applets read that kind of source again
-    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http, regex, mqtt, ws
+    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http, regex, mqtt, ws, imap
     g13-visuals --read SPEC        read one source, exactly as an applet would see it
                                    (put a text-log pattern in quotes: --read 'regex:/tmp/x.log#hp=(\\d+)')
 
