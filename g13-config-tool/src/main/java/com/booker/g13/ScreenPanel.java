@@ -1,13 +1,9 @@
 package com.booker.g13;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.RenderingHints;
-import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,7 +18,6 @@ import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -49,8 +44,6 @@ public class ScreenPanel extends JPanel {
     /** How often the preview reads what the daemon published, in milliseconds. */
     private static final int POLL_MS = 1000;
 
-    /** How much the preview magnifies the 160x43 screen. */
-    private static final int SCALE = 3;
 
     private final transient Visuals visuals = Visuals.load();
 
@@ -67,7 +60,7 @@ public class ScreenPanel extends JPanel {
     private final JLabel owner = new JLabel(" ");
 
     private final JLabel status = new JLabel(" ");
-    private final Preview preview = new Preview();
+    private final ScreenPreview preview = new ScreenPreview();
 
     /** One screen window at a time. */
     private static JFrame window;
@@ -127,54 +120,8 @@ public class ScreenPanel extends JPanel {
     }
 
     // --- the preview ---
-
-    /**
-     * Draws the screen the daemon published, text included, so it matches the panel.
-     */
-    private class Preview extends JComponent {
-        private static final long serialVersionUID = 1L;
-
-        private transient Lcd lcd;
-        private transient boolean[][] overlaps;
-        private String note = "waiting for the daemon to publish a screen";
-
-        Preview() {
-            setPreferredSize(new Dimension(Lcd.WIDTH * SCALE + 2, Lcd.VISIBLE_HEIGHT * SCALE + 2));
-            setBorder(BorderFactory.createLineBorder(Color.DARK_GRAY));
-        }
-
-        @Override
-        protected void paintComponent(final Graphics graphics) {
-            super.paintComponent(graphics);
-            final Graphics2D g = (Graphics2D) graphics;
-            g.setColor(Color.BLACK);
-            g.fillRect(0, 0, getWidth(), getHeight());
-
-            if (lcd == null) {
-                g.setColor(Color.GRAY);
-                g.drawString(note, 8, 20);
-                return;
-            }
-
-            final BufferedImage image = new BufferedImage(Lcd.WIDTH, Lcd.VISIBLE_HEIGHT,
-                    BufferedImage.TYPE_INT_RGB);
-            for (int y = 0; y < Lcd.VISIBLE_HEIGHT; y++) {
-                for (int x = 0; x < Lcd.WIDTH; x++) {
-                    Color colour = lcd.pixel(x, y) ? Color.WHITE : Color.BLACK;
-                    if (overlaps != null && overlaps[x][y]) {
-                        // Text drawn over ink: on one-colour hardware that text is
-                        // invisible, so the preview says so loudly.
-                        colour = Color.ORANGE;
-                    }
-                    image.setRGB(x, y, colour.getRGB());
-                }
-            }
-
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g.drawImage(image, 1, 1, Lcd.WIDTH * SCALE, Lcd.VISIBLE_HEIGHT * SCALE, null);
-        }
-    }
+    // The picture itself lives in ScreenPreview, shared with the applet designer, so there is one
+    // place that knows how to turn the driver's lines into a screen.
 
     /** Reads what the daemon published and re-renders the preview. */
     private void refresh() {
@@ -186,50 +133,17 @@ public class ScreenPanel extends JPanel {
         try {
             lines.addAll(Files.readAllLines(file));
         } catch (IOException e) {
-            preview.lcd = null;
-            preview.overlaps = null;
-            preview.note = "no screen published - is g13-visuals running?";
-            preview.repaint();
+            preview.showMessage("no screen published - is g13-visuals running?");
             status.setText("g13-visuals: " + daemonState());
             return;
         }
 
-        final Lcd base = Lcd.of(lines);
-        if (base == null) {
+        if (!preview.show(lines)) {
+            preview.showMessage("no screen published - is g13-visuals running?");
+            status.setText("g13-visuals: " + daemonState());
             return;
         }
 
-        final boolean[][] overlaps = new boolean[Lcd.WIDTH][Lcd.HEIGHT];
-        for (final Lcd.Placement placement : Lcd.placements(lines)) {
-            // A line that runs past the bottom of the panel is clipped, whatever row its
-            // pixels land on - so this is judged once for the whole block, not per pixel.
-            final boolean belowThePanel = placement.y + LcdFont.HEIGHT > Lcd.VISIBLE_HEIGHT;
-
-            for (int index = 0; index < placement.text.length(); index++) {
-                final char character = placement.text.charAt(index);
-                for (int column = 0; column < 5; column++) {
-                    for (int row = 0; row < LcdFont.HEIGHT; row++) {
-                        if (!LcdFont.pixel(character, column, row)) {
-                            continue;
-                        }
-                        final int x = placement.x + index * LcdFont.ADVANCE + column;
-                        final int y = placement.y + row;
-                        if (x < 0 || x >= Lcd.WIDTH || y < 0 || y >= Lcd.HEIGHT) {
-                            continue;
-                        }
-                        if (base.pixel(x, y) || belowThePanel) {
-                            // Over ink, or off the bottom of the panel.
-                            overlaps[x][y] = true;
-                        }
-                    }
-                }
-            }
-            base.text(placement.x, placement.y, placement.text);
-        }
-
-        preview.lcd = base;
-        preview.overlaps = overlaps;
-        preview.repaint();
         status.setText(String.format("g13-visuals: %s   ·   showing '%s'   ·   %d enabled",
                 daemonState(), visuals.active(), visuals.enabled().size()));
         syncButtonMode();

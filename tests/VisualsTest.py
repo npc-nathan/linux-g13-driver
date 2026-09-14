@@ -402,6 +402,16 @@ check("and the checker's list agrees", ["cmd"], gv.disabled_kinds())
 os.remove("/tmp/visualstest/g13/sources.json")
 check("removing the file switches everything back on", [], gv.disabled_kinds())
 
+# The daemon has to notice an applet *file* changing on its own, not only visuals.json: an applet
+# is a file of its own, and saving one in the designer has to reach the pad without a restart.
+os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
+before = gv.config_stamp_now()
+with open("/tmp/visualstest/g13/applets/stamp.json", "w") as handle:
+    handle.write('{"name": "stamp", "widgets": []}')
+check("editing an applet changes what the daemon watches", True, gv.config_stamp_now() != before)
+os.remove("/tmp/visualstest/g13/applets/stamp.json")
+check("and removing one changes it too", True, gv.config_stamp_now() != before)
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:

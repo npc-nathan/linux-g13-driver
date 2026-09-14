@@ -1622,6 +1622,22 @@ def run_or_answer(argv):
     return answer(argv, registry(values), values)
 
 
+def config_stamp_now():
+    """What the daemon watches for changes: the config file, and the applets directory.
+
+    An applet is a file of its own, so editing one has to bring the screen up to date even when
+    visuals.json has not moved - otherwise saving in the designer would only show on the pad after
+    a restart.
+    """
+    stamps = []
+    for path in (config_dir() / "visuals.json", applet_dir()):
+        try:
+            stamps.append(path.stat().st_mtime)
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
+
+
 def main():
     values = Values()
     try:
@@ -1699,11 +1715,7 @@ def main():
             # --- pick up applets and config changes made elsewhere (the config tool) ---
             if now - last_poll >= CONFIG_POLL_SECONDS:
                 last_poll = now
-                path = config_dir() / "visuals.json"
-                try:
-                    stamp = path.stat().st_mtime
-                except OSError:
-                    stamp = None
+                stamp = config_stamp_now()
 
                 if stamp != config_stamp:
                     config_stamp = stamp
