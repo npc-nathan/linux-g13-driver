@@ -651,6 +651,11 @@ the **Kinds** tab switches.
 | `file:` | the first **line** of a file | `file:/proc/loadavg` | 0.2 s |
 | `json:` | one field of a JSON file | `json:/tmp/hud.json#ammo` | 0.2 s |
 | `cmd:` | a shell command's output | `cmd:nproc` | 2 s, 0.4 s to run |
+
+A `cmd:` that ends with a **non-zero** exit status reads as empty, so a one-liner that ends with a
+test, a grep or a loop whose last iteration failed shows nothing even though it printed the right
+thing. End it with `; true` (or `; :`) and it will. It also has 0.4 seconds: fine for `nproc`, fatal
+for anything that touches the network - that is what `http:`, `mqtt:` and `ws:` are for.
 | `http:` | a value from a web address | `http:ha/api/states/sensor.x#state` | 2 s, 0.5 s to fetch |
 | `regex:` | the last match of a pattern in a text file | `regex:/tmp/game.log#hp=(\d+)` | 0.2 s |
 | `mqtt:` | the last message on a topic | `mqtt:home/sensors/kitchen#state` | instant (pushed) |
