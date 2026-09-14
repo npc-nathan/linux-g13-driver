@@ -236,7 +236,7 @@ uninstall-user:
 	done
 	-systemctl --user daemon-reload
 	-command -v update-desktop-database >/dev/null && update-desktop-database $(USER_APPS_DIR)
-	@echo "Removed: binaries, SDK library and header, service files, menu entries."
+	@echo "Removed: binaries, service files, menu entries."
 	@echo "Kept:    $(USER_CONFIG_DIR) (bindings, macros, visuals, applets)."
 
 uninstall-udev:
