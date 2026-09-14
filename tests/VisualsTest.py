@@ -193,8 +193,67 @@ blank_definition = {
 blank_screen = gv.Screen()
 gv.LayoutVisual(blank_definition, gv.Values()).render(blank_screen, {})
 blank_lines = [message for _x, _y, message in blank_screen.texts]
-check("a missing live value reads as blank", "AMMO", blank_lines[0].rstrip())
-check("a format that cannot be read still says so", "?", blank_lines[1])
+check("a missing live value reads as blank", "AMMO",
+      next((line.rstrip() for line in blank_lines if line.startswith("AMMO")), "no AMMO line"))
+check("a format that cannot be read still says so", "?",
+      next((line for line in blank_lines if line.strip() == "?"), "no ? line"))
+
+# --- an applet fed by a running program can take the screen, and give it back ---------------
+
+follow_definition = {
+    "name": "game", "title": "GAME", "interval": 1, "follow": {"seconds": 20},
+    "sources": {"hud": "json:/tmp/visualstest/hud.json#health"},
+    "widgets": [{"type": "text", "x": 3, "y": 12, "format": "{hud}"}],
+}
+follow_visual = gv.LayoutVisual(follow_definition, values)
+follow_engine = gv.Engine({"enabled": ["clock", "applet:game"], "active": "clock"},
+                          visuals={"clock": gv.VISUALS_BY_NAME["clock"],
+                                   "applet:game": follow_visual},
+                          values=values)
+
+check("an applet without 'follow' never takes the screen", 0.0,
+      gv.LayoutVisual({"name": "plain", "widgets": []}, values).follow_seconds())
+check("'follow': true uses the default", gv.FOLLOW_SECONDS,
+      gv.LayoutVisual({"name": "plain", "follow": True, "widgets": []}, values).follow_seconds())
+check("'follow' takes a number of seconds", 5.0,
+      gv.LayoutVisual({"name": "plain", "follow": {"seconds": 5}, "widgets": []},
+                      values).follow_seconds())
+
+writing = lambda spec, now: 1.0     # the game is being written to right now
+stopped = lambda spec, now: 900.0   # nothing has written to it for a while
+
+follower = gv.Follower()
+check("a fresh applet takes the screen", "applet:game",
+      follower.wanted(follow_engine, 100.0, writing))
+follow_engine.switch_to("applet:game")
+check("and it stays until the writing stops", None,
+      follower.wanted(follow_engine, 101.0, writing))
+check("then the screen goes back to what was there", "clock",
+      follower.wanted(follow_engine, 102.0, stopped))
+
+# Choosing something else while it is running is respected - it saves a button press, it does
+# not fight you - and following picks up again next time the program starts.
+follower = gv.Follower()
+follower.wanted(follow_engine, 100.0, writing)
+follow_engine.switch_to("applet:game")
+follower.user_chose("clock")
+follow_engine.switch_to("clock")
+check("a choice made while the program runs is respected", None,
+      follower.wanted(follow_engine, 101.0, writing))
+follower.wanted(follow_engine, 102.0, stopped)          # the game goes away
+check("and following starts again when it comes back", "applet:game",
+      follower.wanted(follow_engine, 103.0, writing))
+
+check("a data source with no file behind it has no age", None, gv.source_age("cpu"))
+check("an applet's own history is what decides", 0 <= gv.source_age(
+    "file:/tmp/visualstest/somefile.txt") < 600, True)
+# The run loop's clock is monotonic; mixing it with a file's wall-clock mtime once reported
+# every file as billions of seconds young, so nothing ever went stale and the screen was never
+# handed back. The age has to stay small whichever clock is handed in.
+check("a file written just now is young against either clock", True,
+      gv.source_age("file:/tmp/visualstest/somefile.txt", time.monotonic()) < 60)
+check("and against no clock at all", True,
+      gv.source_age("file:/tmp/visualstest/somefile.txt") < 60)
 
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)

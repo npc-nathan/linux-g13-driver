@@ -50,6 +50,8 @@ BUTTON_SELECT = 28      # L4
 LONG_PRESS_SECONDS = 0.6
 CONFIG_POLL_SECONDS = 1.0
 RECONNECT_SECONDS = 2.0
+#: How long an applet that says "follow" keeps the screen after its data stops arriving.
+FOLLOW_SECONDS = 20.0
 
 KEY_NAMES = {index: "G%d" % index for index in range(22)}
 KEY_NAMES.update({
@@ -676,6 +678,29 @@ class LayoutVisual:
             return ""
         return self.values.raw(self.spec_of(str(source)))
 
+    def follow_seconds(self):
+        """How long this applet keeps the screen after its data stops arriving, or 0.
+
+        A game HUD is written from outside, so the applet can say so:
+
+            "follow": {"seconds": 20}
+
+        `"follow": true` uses the default. Without it the applet is only ever shown because
+        somebody chose it.
+        """
+        follow = self.definition.get("follow", 0)
+        if follow is True:
+            return FOLLOW_SECONDS
+        if isinstance(follow, dict):
+            try:
+                return float(follow.get("seconds", FOLLOW_SECONDS))
+            except (TypeError, ValueError):
+                return FOLLOW_SECONDS
+        try:
+            return float(follow or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def render(self, screen, context):
         border = self.definition.get("border", True)
         if border:
@@ -1082,6 +1107,99 @@ def publish(lines, values):
     publish_values(values)
 
 
+def source_age(spec, now=None):
+    """How long ago the file behind a data source was written, in seconds, or None.
+
+    Only files have an age: `json:` and `file:` are read from disk, `cmd:` is run, and the
+    rest come from the machine itself.
+    """
+    if ":" not in spec:
+        return None
+    scheme, rest = spec.split(":", 1)
+    if scheme not in ("json", "file"):
+        return None
+    path = rest.split("#", 1)[0]
+    try:
+        written = os.stat(os.path.expanduser(path)).st_mtime
+    except OSError:
+        return None
+
+    reference = time.time() if now is None else now
+    age = reference - written
+    if age < -60:
+        # The reference is not a wall clock - the run loop's timer is monotonic, and mixing the
+        # two makes every file look billions of seconds young, so nothing would ever go stale.
+        age = time.time() - written
+    return max(0.0, age)
+
+
+class Follower:
+    """Lets a visual fed by a running program take the screen, and hand it back.
+
+    A game HUD is only interesting while the game is running. The applet says so - "follow":
+    {"seconds": 20} - and the daemon watches the files behind its own live sources: while one
+    of them is being written, the applet is what is on the screen, and when the writing stops
+    the screen goes back to whatever was showing before.
+
+    Choosing something else while it is running is respected: this saves a button press, it
+    does not fight you. Following starts again the next time the program runs.
+    """
+
+    def __init__(self):
+        self.following = None          # the applet that took the screen
+        self.previous = None           # what to give it back to
+        self.suppressed = False        # you picked something else while it was running
+        self.live = []                 # applets being written to right now
+        self.stopped = None            # the applet that just went quiet, for the log
+
+    def live_applets(self, engine, now, age=source_age):
+        names = []
+        for name in engine.enabled:
+            visual = engine.visuals.get(name)
+            seconds = getattr(visual, "follow_seconds", lambda: 0)()
+            if not seconds:
+                continue
+            for spec in visual.sources():
+                age_of = age(spec, now)
+                if age_of is not None and age_of <= seconds:
+                    names.append(name)
+                    break
+        return names
+
+    def wanted(self, engine, now, age=source_age):
+        """Which visual should be showing, or None to leave things alone."""
+        self.live = self.live_applets(engine, now, age)
+        self.stopped = None
+
+        if self.following and self.following not in self.live:
+            self.stopped = self.following
+            back = self.previous if self.previous in engine.enabled else engine.enabled[0]
+            self.following = self.previous = None
+            self.suppressed = False
+            return back if back != engine.active else None
+
+        if not self.live:
+            self.following = self.previous = None
+            self.suppressed = False
+            return None
+
+        if self.following or self.suppressed:
+            return None
+        if engine.active in self.live:
+            # Already showing it; remember, so it can be handed back later.
+            self.following = engine.active
+            return None
+
+        self.previous = engine.active
+        self.following = self.live[0]
+        return self.following
+
+    def user_chose(self, name):
+        """Called when the active visual changed for a reason that was not this."""
+        if self.following and name != self.following:
+            self.suppressed = True
+
+
 def config_supersedes(engine, fresh):
     """Whether a freshly read config file should replace the running engine.
 
@@ -1103,9 +1221,11 @@ def main():
 
     config_stamp = None
     last_poll = 0.0
+    last_follow = 0.0
     last_drawn = 0.0
     dirty = True
     shown_state = None
+    follower = Follower()
 
     while True:
         # --- the driver's event socket, reconnecting as needed ---
@@ -1179,8 +1299,24 @@ def main():
                                    visuals=fresh_visuals, values=values)
                     # The file is the shared truth, including which visual is showing.
                     if config_supersedes(engine, fresh):
+                        follower.user_chose(fresh.active)
                         engine = fresh
                         dirty = True
+
+            # --- a program that is running behind an applet gets the screen, and gives ---
+            # --- it back when it stops                                                  ---
+            if now - last_follow >= CONFIG_POLL_SECONDS:
+                last_follow = now
+                wanted = follower.wanted(engine, now)
+                if wanted and wanted != engine.active:
+                    engine.switch_to(wanted)
+                    dirty = True
+                    if follower.stopped:
+                        print("g13-visuals: '%s' stopped, going back to '%s'"
+                              % (follower.stopped, wanted), flush=True)
+                    else:
+                        print("g13-visuals: '%s' is being written to, showing it" % wanted,
+                              flush=True)
 
             # --- draw when the visual asks for it, or straight after a button ---
             if not paused and (dirty or now - last_drawn >= engine.interval()):

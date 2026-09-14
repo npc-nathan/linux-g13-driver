@@ -329,10 +329,16 @@ field and how sure each one is.
 Two deliberate gaps: there is **no turn-by-turn** (the game's own route is not readable), and
 **ammo is probed, not known**, because builds differ in what they answer. What there is instead
 of turn-by-turn: an **arrow to your map pin** with the distance, pointing relative to which way
-you are facing, plus the **district** you are in and the nearest named place. Street names are
-not available anywhere found. `G13Probe()` in the CET console prints what your build allows —
-including every map mappin variant with its distance, which is how the pin is identified — and
-every uncertain call is guarded, so a build that refuses one leaves a blank rather than an error.
+you are facing, plus the **district** you are in and the nearest map label — which on the first
+run here was `Drake Ave`, i.e. the road. `G13Probe()` in the CET console prints what your build
+allows — including every map mappin variant with its distance, which is how the pin is
+identified — and every uncertain call is guarded, so a build that refuses one leaves a blank
+rather than an error.
+
+The pad **shows this by itself while the game is running** and goes back to the previous visual
+about twenty seconds after you quit, because the applet says `"follow": {"seconds": 20}`. It
+follows the game running, not the game being focused, so alt-tabbing does not flicker the
+screen; choosing another visual by hand is respected until the game goes away.
 
 **Which framework?** CET (Lua) is the only practical way to get live state out of a running
 Cyberpunk 2077 — it can write files, and REDscript cannot. REDscript is also Cyberpunk-only (its
@@ -454,6 +460,14 @@ value. A missing file, a missing field, unreadable JSON or a field that is not a
 read as empty, so whatever produces the file can stop without disturbing the screen.
 `json:` and `file:` are cached 0.2 s rather than the 2 s used for the rest, because a value
 being watched live should not lag the thing producing it.
+
+An applet fed by a running program can take the screen by itself: `"follow": {"seconds": 20}`
+tells the daemon to watch the files behind that applet's own live sources. While one of them is
+being written the applet is what is showing, and when the writing stops the screen goes back to
+whatever was there before. It is keyed on the program *running*, not on a window being focused,
+so alt-tabbing does not make the screen flicker, and a visual you pick by hand while it runs is
+respected until the program goes away. Without that line an applet is only shown because
+somebody chose it. The Cyberpunk applet is the one that uses it.
 
 An applet can give its sources short names, so widgets and formats do not repeat a path -
 `"sources": {"ammo": "json:~/hud.json#ammo"}`, then `{"type": "text", "format": "AMMO {ammo}"}`.

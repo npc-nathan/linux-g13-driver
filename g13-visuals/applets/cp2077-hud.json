@@ -3,6 +3,7 @@
   "title": "NIGHT CITY",
   "border": true,
   "interval": 0.2,
+  "follow": {"seconds": 20},
   "sources": {
     "health": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#health",
     "ammo": "json:{GAME}/bin/x64/plugins/cyber_engine_tweaks/mods/g13-hud/hud.json#ammo",

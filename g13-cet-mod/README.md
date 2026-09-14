@@ -93,6 +93,23 @@ If you edit the path, edit every `json:` line in the applet — they each carry 
 `hud.json`.
 </details>
 
+## It comes and goes with the game
+
+You do not have to choose it: while the game is writing `hud.json`, the pad shows NIGHT CITY by
+itself, and about twenty seconds after you quit it goes back to whatever was showing before. The
+grace period is there because a long load or a paused game can stop the writing for a while.
+
+It follows the game **running**, not the game being focused, so alt-tabbing to a browser changes
+nothing — CET keeps writing while the game is loaded. Switching by hand while it is running is
+respected: pick the clock and it stays on the clock until the game goes away.
+
+That behaviour is one line in the applet, and removing it makes the applet an ordinary one you
+choose yourself:
+
+```json
+"follow": {"seconds": 20},
+```
+
 ## On the pad
 
 Tap the round **G24** button (left of the screen) until the title reads **NIGHT CITY**, or open
@@ -184,10 +201,10 @@ line to wire in.
   corner and no road to follow on the screen. What there is instead: **an arrow to your map
   pin** — the game's own custom-position mappin — with the distance, and it points relative to
   which way you are facing, so straight up means straight ahead.
-- **Street names are not available.** The district you are standing in is (`district`, from the
-  PreventionSystem), and the nearest named place (`near`), but nothing found returns a street
-  name. `G13Probe()` lists every mappin variant on your map with its distance, so if a street
-  layer exists in your build it will show up there.
+- **The nearest map label is often the road you are on.** `near` came back as `Drake Ave` on the
+  first run here — the map's own labels include street names, so this frequently *is* the street,
+  but there is no street API behind it: it is whichever named label is closest, which may be a
+  shop or a building instead.
 - **The distance to a pin is a straight line**, and assumes 100 world units to the metre. Drive a
   known distance once with the pin set; if the number is out by a factor, it is one constant
   (`PIN_UNITS_PER_METRE`).

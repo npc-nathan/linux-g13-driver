@@ -57,9 +57,49 @@ fi
 
 MODS_DIR="$GAME/bin/x64/plugins/cyber_engine_tweaks/mods"
 
+# The pad cycles through the visuals listed in visuals.json, so a newly installed applet has to
+# be added there or it can only be found by opening the config tool. Done here, undone by
+# --remove, and it leaves everything else in that file alone.
+update_visuals() {
+    python3 - "$1" "$APPLETS_DIR/$APPLET_NAME" <<'PY'
+import json
+import os
+import sys
+
+action, applet = sys.argv[1], sys.argv[2]
+name = "applet:" + os.path.basename(applet)[: -len(".json")]
+path = os.path.expanduser(os.environ.get("VISUALS_FILE", "~/.config/g13/visuals.json"))
+
+try:
+    with open(path) as handle:
+        config = json.load(handle)
+except (OSError, ValueError):
+    config = {}
+
+enabled = [item for item in (config.get("enabled") or []) if item != name]
+if action == "add":
+    enabled.append(name)
+config["enabled"] = enabled
+config.setdefault("cycle", False)
+config.setdefault("cycle_seconds", 10.0)
+
+# Whoever was showing: if it was the applet being removed, move to something that is enabled.
+if config.get("active") not in enabled:
+    config["active"] = enabled[0] if enabled else config.get("active", "clock")
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as handle:
+    json.dump(config, handle, indent=2)
+    handle.write("\n")
+
+print("  pad visuals: %s %s" % (name, "added" if action == "add" else "removed"))
+PY
+}
+
 if [ "$REMOVE" = "1" ]; then
     rm -rf "$MODS_DIR/$MOD_NAME"
     rm -f "$APPLETS_DIR/$APPLET_NAME"
+    update_visuals remove
     echo "removed:"
     echo "  $MODS_DIR/$MOD_NAME"
     echo "  $APPLETS_DIR/$APPLET_NAME"
@@ -85,13 +125,15 @@ install -m 644 "$HERE/README.md" "$MODS_DIR/$MOD_NAME/README.md"
 
 install -d "$APPLETS_DIR"
 sed "s|{GAME}|$GAME|g" "$HERE/../g13-visuals/applets/$APPLET_NAME" > "$APPLETS_DIR/$APPLET_NAME"
+update_visuals add
 
 echo "installed:"
 echo "  mod:    $MODS_DIR/$MOD_NAME/init.lua"
 echo "  applet: $APPLETS_DIR/$APPLET_NAME"
 echo
 echo "Next:"
-echo "  1. start the game - the mod writes hud.json in its own folder about five times a second"
+echo "  1. start the game. While it is running the pad shows NIGHT CITY by itself, and goes back"
+echo "     to what it was showing when you close it"
 echo "  2. in the CET console, G13Probe() lists what this build answers (useful if ammo is blank)"
-echo "  3. on the pad, tap the round button until the screen shows NIGHT CITY, or pick it in the"
-echo "     config tool's Screen window and press 'Show now'"
+echo "  3. to choose it by hand instead: tap the round button until it reads NIGHT CITY, or press"
+echo "     'Show now' in the config tool's Screen window"
