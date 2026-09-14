@@ -461,6 +461,8 @@ writes the same file, and nothing about it is hidden in the window.
   nothing to lose by closing the window.
 - **While it is open, that applet is the one on the pad**, so what you are editing is what you are
   looking at.
+- **The daemon watches the applet files themselves**, so a save reaches the pad within a second —
+  no restart, and nothing to click.
 - **The picture is the daemon's own frame**, read back from the driver, not a second renderer's idea
   of the design. If the window and the pad could disagree, the window would be lying.
 - **The status line names the final authority**: `g13-applet check <file>` knows the rules the pad

@@ -1378,6 +1378,23 @@ class Follower:
             self.suppressed = True
 
 
+def reloaded(engine, fresh):
+    """The engine to carry on with after the files changed on disk.
+
+    config_supersedes answers "has the config file something to say that the running state does not
+    already do?". When what changed is an applet's own file, or a source switched on or off, the
+    answer is no - the active choice has not moved - but the drawings still have to come from the
+    files as they are now, or an edit would never reach the pad. So the fresh drawings are adopted
+    either way, and only which visual is showing is the config's to decide.
+
+    Returns the engine to carry on with; it is the fresh one when the config has spoken.
+    """
+    if config_supersedes(engine, fresh):
+        return fresh
+    engine.visuals = fresh.visuals
+    return engine
+
+
 def config_supersedes(engine, fresh):
     """Whether a freshly read config file should replace the running engine.
 
@@ -1623,18 +1640,32 @@ def run_or_answer(argv):
 
 
 def config_stamp_now():
-    """What the daemon watches for changes: the config file, and the applets directory.
+    """What the daemon watches for changes: the config file, and every applet file.
 
     An applet is a file of its own, so editing one has to bring the screen up to date even when
     visuals.json has not moved - otherwise saving in the designer would only show on the pad after
     a restart.
+
+    Each applet is watched by name, size and mtime rather than by watching the applets directory.
+    Writing to a file that is already in a directory does *not* move the directory's own mtime -
+    only adding, removing or renaming an entry does - so a directory watch sees an edit as no
+    change at all, which is exactly how a designer save went unnoticed.
     """
     stamps = []
-    for path in (config_dir() / "visuals.json", applet_dir()):
+    try:
+        stamps.append((config_dir() / "visuals.json").stat().st_mtime)
+    except OSError:
+        stamps.append(None)
+    try:
+        applets = sorted(applet_dir().glob("*.json"))
+    except OSError:
+        applets = []
+    for path in applets:
         try:
-            stamps.append(path.stat().st_mtime)
+            info = path.stat()
+            stamps.append((path.name, info.st_mtime, info.st_size))
         except OSError:
-            stamps.append(None)
+            stamps.append((path.name, None, None))
     return tuple(stamps)
 
 
@@ -1727,11 +1758,14 @@ def main():
                         fresh_visuals = engine.visuals
                     fresh = Engine(read_config(), clock=engine.clock,
                                    visuals=fresh_visuals, values=values)
-                    # The file is the shared truth, including which visual is showing.
-                    if config_supersedes(engine, fresh):
+                    # The file is the shared truth, including which visual is showing - and when
+                    # what changed is an applet rather than the active choice, the new drawings are
+                    # taken while the visual on the pad stays where it is.
+                    replaced = reloaded(engine, fresh)
+                    if replaced is not engine:
                         follower.user_chose(fresh.active)
-                        engine = fresh
-                        dirty = True
+                    engine = replaced
+                    dirty = True
 
             # --- a program that is running behind an applet gets the screen, and gives ---
             # --- it back when it stops                                                  ---

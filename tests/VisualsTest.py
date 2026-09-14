@@ -405,12 +405,22 @@ check("removing the file switches everything back on", [], gv.disabled_kinds())
 # The daemon has to notice an applet *file* changing on its own, not only visuals.json: an applet
 # is a file of its own, and saving one in the designer has to reach the pad without a restart.
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
+stamp_file = "/tmp/visualstest/g13/applets/stamp.json"
 before = gv.config_stamp_now()
-with open("/tmp/visualstest/g13/applets/stamp.json", "w") as handle:
+with open(stamp_file, "w") as handle:
     handle.write('{"name": "stamp", "widgets": []}')
-check("editing an applet changes what the daemon watches", True, gv.config_stamp_now() != before)
-os.remove("/tmp/visualstest/g13/applets/stamp.json")
-check("and removing one changes it too", True, gv.config_stamp_now() != before)
+added = gv.config_stamp_now()
+check("adding an applet is noticed", True, added != before)
+
+# The case that was actually broken: writing to a file that is already there does not move the
+# directory's own mtime, so a watch on the directory saw the designer's save as no change at all.
+with open(stamp_file, "w") as handle:
+    handle.write('{"name": "stamp", "title": "STAMP", "widgets": []}')
+edited = gv.config_stamp_now()
+check("editing one that already exists is noticed too", True, edited != added)
+
+os.remove(stamp_file)
+check("and removing one is noticed", True, gv.config_stamp_now() != edited)
 
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
@@ -647,6 +657,41 @@ check("config: a different active visual is adopted", True,
 check("config: a reordered list is adopted", True,
       gv.config_supersedes(running, gv.Engine({"enabled": ["system", "clock"],
                                                "active": "clock"}, clock=FakeClock())))
+
+# --- an applet edited on disk reaches the pad, with visuals.json untouched -------------------
+# This is the case that was broken: the fresh drawings were built and then thrown away because the
+# *config file* had nothing new to say, so a save in the designer only appeared after a restart.
+edited_name = "edited-on-disk"
+edited_file = gv.applet_dir() / (edited_name + ".json")
+edited_file.parent.mkdir(parents=True, exist_ok=True)
+with open(str(edited_file), "w") as handle:
+    json.dump({"name": edited_name, "title": "EDIT", "interval": 1, "widgets": [
+        {"type": "text", "x": 3, "y": 12, "format": "BEFORE {cpu:.0f}"}]}, handle)
+
+applet_values = gv.Values()
+held = gv.Engine({"enabled": ["applet:" + edited_name], "active": "applet:" + edited_name},
+                 clock=FakeClock(), visuals=gv.registry(applet_values), values=applet_values)
+before_edit = gv.Screen()
+held.visuals[held.active].render(before_edit, {})
+check("applet: it draws what the file said", True,
+      any(message.startswith("BEFORE") for _x, _y, message in before_edit.texts))
+
+# The edit a designer save makes: the applet's own file, and nothing else.
+with open(str(edited_file), "w") as handle:
+    json.dump({"name": edited_name, "title": "EDIT", "interval": 1, "widgets": [
+        {"type": "text", "x": 3, "y": 12, "format": "AFTER {cpu:.0f}"}]}, handle)
+
+fresh = gv.Engine({"enabled": ["applet:" + edited_name], "active": "applet:" + edited_name},
+                  clock=FakeClock(), visuals=gv.registry(applet_values), values=applet_values)
+carried_on = gv.reloaded(held, fresh)
+after_edit = gv.Screen()
+carried_on.visuals[carried_on.active].render(after_edit, {})
+check("applet: an edited applet is drawn from the new file", True,
+      any(message.startswith("AFTER") for _x, _y, message in after_edit.texts))
+check("applet: the pad stays on the same visual", "applet:" + edited_name, carried_on.active)
+check("applet: an applet edit alone does not move the active visual", True, carried_on is held)
+
+os.remove(str(edited_file))
 
 # --- who owns the screen and the four buttons (an SDK client, or the visuals) ---
 # The harness pins XDG_CONFIG_HOME to a scratch directory that outlives a run, so start from
