@@ -1652,15 +1652,12 @@ def config_stamp_now():
     change at all, which is exactly how a designer save went unnoticed.
     """
     stamps = []
+    watched = [config_dir() / "visuals.json", config_dir() / SOURCES_FILE]
     try:
-        stamps.append((config_dir() / "visuals.json").stat().st_mtime)
+        watched += sorted(applet_dir().glob("*.json"))
     except OSError:
-        stamps.append(None)
-    try:
-        applets = sorted(applet_dir().glob("*.json"))
-    except OSError:
-        applets = []
-    for path in applets:
+        pass
+    for path in watched:
         try:
             info = path.stat()
             stamps.append((path.name, info.st_mtime, info.st_size))

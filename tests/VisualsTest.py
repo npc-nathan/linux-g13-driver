@@ -422,6 +422,17 @@ check("editing one that already exists is noticed too", True, edited != added)
 os.remove(stamp_file)
 check("and removing one is noticed", True, gv.config_stamp_now() != edited)
 
+# The sources panel's switches are a file the daemon reads too, so it is watched as well - the
+# same trap as the applets: a file the daemon reads but does not watch is a switch that does
+# nothing until something else happens to change.
+sources_file = gv.config_dir() / gv.SOURCES_FILE
+before_sources = gv.config_stamp_now()
+sources_file.write_text('{"disabled": ["cmd"]}')
+switched = gv.config_stamp_now()
+check("a source switched off is noticed", True, switched != before_sources)
+sources_file.unlink()
+check("and switching it back on is noticed", True, gv.config_stamp_now() != switched)
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:
