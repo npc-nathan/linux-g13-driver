@@ -28,6 +28,7 @@ with any text editor. Both ways are first-class.
   15. [Add a web address and its token](#15-add-a-web-address-and-its-token)
   16. [A value is blank — find out why](#16-a-value-is-blank--find-out-why)
   17. [Show something a program can only print](#17-show-something-a-program-can-only-print)
+  18. [Show what an MQTT topic says](#18-show-what-an-mqtt-topic-says)
 - Part 2 — Reference
   - [The applet file](#the-applet-file)
   - [The variables](#the-variables)
@@ -525,6 +526,34 @@ last 64 KB is read, so a log can grow without limit. If the file is missing, the
 or nothing matches, the value is **empty** and the screen keeps drawing — `g13-applet check --values`
 says which of those it was.
 
+## 18. Show what an MQTT topic says
+
+If a device, a home-automation system or a script publishes to a broker, `mqtt:` shows the **last
+message** on a topic — no polling, no script, and it works for a broker on the other side of the house.
+
+1. Put the broker in `~/.config/g13/endpoints.json`, with any username and password **next to it**:
+
+   ```json
+   { "home": { "url": "mqtt://homeassistant.local:1883", "user": "g13", "token": "…" } }
+   ```
+
+   `mqtts://` is the same thing over TLS.
+
+2. Read a topic, then ask for a field if the payload is JSON:
+
+   ```bash
+   $ g13-visuals --read 'mqtt:home/sensors/kitchen#temperature'
+     mqtt:home/sensors/kitchen#temperature
+     -> '21.5'
+   ```
+
+3. Use it in an applet: `temp = mqtt:home/sensors/kitchen#temperature`, then `format: "{temp}C"`.
+
+The first reading after a topic is first asked for is blank for a fraction of a second: applets
+subscribe lazily, so only topics something actually uses are subscribed to. Nothing here ever waits
+for the broker — a broker that is down leaves the value blank and the screen keeps drawing, which is
+also why the pad never stutters because a sensor went away.
+
 # Part 2 — Reference
 
 ## The applet file
@@ -588,6 +617,7 @@ the **Kinds** tab switches.
 | `cmd:` | a shell command's output | `cmd:nproc` | 2 s, 0.4 s to run |
 | `http:` | a value from a web address | `http:ha/api/states/sensor.x#state` | 2 s, 0.5 s to fetch |
 | `regex:` | the last match of a pattern in a text file | `regex:/tmp/game.log#hp=(\d+)` | 0.2 s |
+| `mqtt:` | the last message on a topic | `mqtt:home/sensors/kitchen#state` | instant (pushed) |
 
 `json:` and `http:` walk into their data with `#field`: `#hud.ammo` for a nested object, `#route.0`
 for the first item of a list. Anything missing or unreadable reads as **empty** — never an error on

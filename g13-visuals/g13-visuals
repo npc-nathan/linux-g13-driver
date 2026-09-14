@@ -31,6 +31,7 @@ import math
 import os
 import re
 import socket
+import threading
 import string
 import http.client
 import ssl
@@ -282,6 +283,8 @@ SOURCE_KINDS = (
     ("http", "web addresses, e.g. http:weather/now#temp; the address and any token are named "
              "in endpoints.json, never in the applet"),
     ("regex", "a pattern out of a text file, e.g. regex:/tmp/game.log#health=(\\d+)"),
+    ("mqtt", "the last message on a topic, e.g. mqtt:home/sensors/kitchen#state; the broker and "
+             "any credential are named in endpoints.json, never in the applet"),
 )
 
 SOURCES_FILE = "sources.json"
@@ -631,6 +634,253 @@ def shell(command, timeout=0.4):
     return result.stdout.strip()
 
 
+# ---------------------------------------------------------------- mqtt
+#
+# `mqtt:<endpoint>/<topic>#<field>` shows the last thing published on a topic. A broker is just an
+# address, so it is named in endpoints.json like any other, with an `mqtt://` scheme and with any
+# username and password there rather than in an applet:
+#
+#   { "home": { "url": "mqtt://homeassistant.local:1883", "user": "g13", "token": "..." } }
+#
+# One connection per broker, one thread each, one subscription per topic an applet actually asks
+# for. Messages are kept as they arrive, so asking for a value is instant and the drawing thread
+# never waits on a broker that has gone away: a value is simply empty until the first message lands.
+# `mqtts://` is TLS. As with every other source here, anything that goes wrong reads as empty.
+
+MQTT_KEEPALIVE = 30
+
+
+def read_mqtt_length(stream):
+    """MQTT's variable-length integer: up to four bytes, seven bits each, high bit continues."""
+    value, shift = 0, 0
+    while True:
+        byte = stream.read(1)
+        if not byte:
+            return None
+        value |= (byte[0] & 0x7F) << shift
+        if not byte[0] & 0x80:
+            return value
+        shift += 7
+        if shift > 21:
+            return None
+
+
+def encode_mqtt_length(length):
+    out = bytearray()
+    while True:
+        byte = length % 128
+        length //= 128
+        if length:
+            byte |= 0x80
+        out.append(byte)
+        if not length:
+            return bytes(out)
+
+
+class MqttBroker:
+    """One broker: connects when a topic is first asked for, keeps the last message per topic."""
+
+    def __init__(self, name, url, user="", token=""):
+        self.name = name
+        self.host, self.port, self.secure = self._address(url)
+        self.user = user
+        self.token = token
+        self.last = {}                  # topic -> payload
+        self.armed = set()              # topics an applet has asked for
+        self.buffer = b""
+        self.connected = False
+        self.thread = None
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _address(url):
+        """`mqtt://host:1883`, `mqtts://host`, or a bare host, with the usual default ports."""
+        rest, secure = url, False
+        for scheme in ("mqtt://", "mqtts://", "tcp://", "ssl://"):
+            if rest.startswith(scheme):
+                secure = scheme in ("mqtts://", "ssl://")
+                rest = rest[len(scheme):]
+                break
+        rest = rest.rstrip("/")
+        host, _, port = rest.partition(":")
+        return host, int(port) if port.isdigit() else (8883 if secure else 1883), secure
+
+    def ask_for(self, topic):
+        """An applet wants this topic: remember it, and connect if we are not already trying."""
+        with self.lock:
+            if topic in self.armed:
+                return
+            self.armed.add(topic)
+        if self.thread is None or not self.thread.is_alive():
+            self.thread = threading.Thread(target=self._run, name="mqtt-%s" % self.name, daemon=True)
+            self.thread.start()
+
+    def payload(self, topic):
+        with self.lock:
+            return self.last.get(topic, "")
+
+    def _packet(self, kind, body):
+        return bytes([kind]) + encode_mqtt_length(len(body)) + body
+
+    def _connect_packet(self):
+        flags, payload = 0x02, bytearray()               # clean session
+        client_id = ("g13-visuals-%d" % os.getpid()).encode()
+        for item in (client_id, self.user.encode() if self.user else None,
+                     self.token.encode() if self.token else None):
+            if item:
+                payload += len(item).to_bytes(2, "big") + item
+        if self.user:
+            flags |= 0x80                                # a username follows
+        if self.token:
+            flags |= 0x40                                # so does a password
+        head = bytearray(b"\x00\x04MQTT\x04")
+        head.append(flags)
+        head += MQTT_KEEPALIVE.to_bytes(2, "big")
+        return self._packet(0x10, bytes(head) + bytes(payload))
+
+    def _subscribe_packet(self, topic, packet_id):
+        body = packet_id.to_bytes(2, "big") + len(topic).to_bytes(2, "big") + topic.encode() + b"\x00"
+        return self._packet(0x82, body)
+
+    def _read_exact(self, sock, count):
+        """Exactly `count` bytes, or None when the broker is quiet for a whole timeout.
+
+        Returns None rather than blocking, so the loop gets a chance to subscribe to a topic that
+        was asked for while we sat here and to send a keepalive - a broker that says nothing must
+        not stop us hearing about a new topic, nor get us disconnected for silence.
+        """
+        while len(self.buffer) < count:
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                return None
+            if not chunk:
+                return None
+            self.buffer += chunk
+        out, self.buffer = self.buffer[:count], self.buffer[count:]
+        return out
+
+    def _read_length(self, sock):
+        """MQTT's variable-length integer, read a byte at a time."""
+        value, shift = 0, 0
+        while True:
+            byte = self._read_exact(sock, 1)
+            if byte is None:
+                return None
+            value |= (byte[0] & 0x7F) << shift
+            if not byte[0] & 0x80:
+                return value
+            shift += 7
+            if shift > 21:
+                return None
+
+    def _run(self):
+        """The broker's thread: connect, subscribe to whatever is wanted, keep up, reconnect."""
+        attempt = 0
+        while True:
+            try:
+                with self.lock:
+                    wanted = sorted(self.armed)
+                if not wanted:
+                    time.sleep(0.25)
+                    continue
+                sock = socket.create_connection((self.host, self.port), timeout=6)
+                if self.secure:
+                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+                sock.settimeout(1.0)                     # a quiet second is not a failure
+                self.buffer = b""
+                sock.sendall(self._connect_packet())
+                answer = self._read_exact(sock, 4)
+                if not answer or answer[3] != 0:
+                    raise OSError("broker refused the connection")
+                self.connected, attempt = True, 0
+                with self.lock:
+                    wanted = sorted(self.armed)
+                sent, packet_id = set(), 1
+                for topic in wanted:
+                    sock.sendall(self._subscribe_packet(topic, packet_id))
+                    packet_id += 1
+                    sent.add(topic)
+                last_ping = time.monotonic()
+                while True:
+                    with self.lock:
+                        missing = sorted(self.armed - sent)
+                    for topic in missing:                # asked for since we connected
+                        sock.sendall(self._subscribe_packet(topic, packet_id))
+                        packet_id += 1
+                        sent.add(topic)
+                    header = self._read_exact(sock, 1)
+                    if header is None:                   # nothing arrived: ping if it is due, and
+                        if time.monotonic() - last_ping > MQTT_KEEPALIVE / 2:
+                            sock.sendall(b"\xc0\x00")   # then go round again to catch new topics
+                            last_ping = time.monotonic()
+                        continue
+                    length = self._read_length(sock)
+                    body = self._read_exact(sock, length) if length else b""
+                    if header[0] >> 4 == 3 and body and len(body) > 2:      # PUBLISH
+                        topic_length = int.from_bytes(body[0:2], "big")
+                        topic = body[2:2 + topic_length].decode("utf-8", "replace")
+                        with self.lock:
+                            self.last[topic] = body[2 + topic_length:].decode("utf-8", "replace")
+            except (OSError, ssl.SSLError, ValueError):
+                self.connected = False
+                attempt += 1
+                time.sleep(min(30, 2 ** min(attempt, 5)))
+                if attempt > 20:                     # give up quietly; asking again starts it over
+                    return
+
+    def value(self, topic, field):
+        raw = self.payload(topic)
+        if not raw or not field:
+            return raw
+        try:
+            return field_of(json.loads(raw), field)
+        except (ValueError, TypeError):
+            return ""
+
+
+MQTT_BROKERS = {}
+
+
+def mqtt_broker_for(name, entries):
+    """The broker `<name>` means, from the same endpoints.json that `http:` uses.
+
+    An entry counts as a broker only if its address says so, so one file holds web addresses and
+    brokers together and the scheme decides which is which.
+    """
+    if name in MQTT_BROKERS:
+        return MQTT_BROKERS[name]
+    entry = entries.get(name)
+    if not isinstance(entry, dict):
+        return None
+    url = str(entry.get("url", ""))
+    if not url.startswith(("mqtt://", "mqtts://", "tcp://", "ssl://")):
+        return None
+    broker = MqttBroker(name, url, str(entry.get("user", "")), str(entry.get("token", "")))
+    MQTT_BROKERS[name] = broker
+    return broker
+
+
+def mqtt_value(spec, entries):
+    """`mqtt:<endpoint>/<topic>#<field>` -> the last message on that topic, or empty.
+
+    Instant: it answers with whatever has arrived and asks the broker to start sending that topic.
+    Nothing here ever waits, which is what keeps a slow or absent broker from holding up the screen.
+    """
+    rest = spec[len("mqtt:"):]
+    address, separator, field = rest.rpartition("#")
+    if not separator:
+        address, field = rest, ""
+    endpoint, slash, topic = address.partition("/")
+    if not slash or not topic:
+        return ""
+    broker = mqtt_broker_for(endpoint, entries)
+    if broker is None:
+        return ""
+    broker.ask_for(topic)
+    return broker.value(topic, field)
+
+
 class Values:
     """The live numbers and strings an applet can put on the screen.
 
@@ -723,7 +973,10 @@ class Values:
     def raw(self, source):
         now = self.clock()
         cached = self.cache.get(source)
-        seconds = (self.LIVE_CACHE_SECONDS if source.startswith(("json:", "file:"))
+        # These three are already local and already cheap: a file or a dict lookup, not a command
+        # or a fetch. `mqtt:` is here because its value is pushed to us and kept - caching it for
+        # two seconds would make a pushed value appear late for no reason at all.
+        seconds = (self.LIVE_CACHE_SECONDS if source.startswith(("json:", "file:", "mqtt:"))
                    else self.CACHE_SECONDS)
         if cached and now - cached[0] < seconds:
             return cached[1]
@@ -794,6 +1047,9 @@ class Values:
 
         if source.startswith("regex:"):
             return self.regex_field(source[6:])
+
+        if source.startswith("mqtt:"):
+            return mqtt_value(source, self.endpoints())
 
         return ""
 
@@ -1591,7 +1847,7 @@ CLI_HELP = """g13-visuals - the pad's screen.
     g13-visuals --status           what is showing, who owns the screen, is the daemon up
     g13-visuals --sources          what data applets may read, and what is switched off
     g13-visuals --enable-source K  let applets read that kind of source again
-    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http, regex
+    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http, regex, mqtt
     g13-visuals --read SPEC        read one source, exactly as an applet would see it
                                    (put a text-log pattern in quotes: --read 'regex:/tmp/x.log#hp=(\\d+)')
 

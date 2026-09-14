@@ -51,6 +51,8 @@ public class Sources {
         new Kind("http", "web addresses, e.g. http:weather/now#temp; the address and any token "
                 + "are named in endpoints.json, never in the applet"),
         new Kind("regex", "a pattern out of a text file, e.g. regex:/tmp/game.log#health=(\\d+)"),
+        new Kind("mqtt", "the last message on a topic, e.g. mqtt:home/sensors/kitchen#state; the broker "
+                + "and any credential are named in endpoints.json, never in the applet"),
     };
 
     /** The file the daemon reads. */

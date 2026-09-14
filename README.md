@@ -421,7 +421,7 @@ writes the same file, and nothing about it is hidden in the window.
 *(Part of [docs/applets.md](docs/applets.md): [Stop applets reading something](docs/applets.md#14-stop-applets-reading-something).)*
 
 The **Sources…** button opens what data an applet may read, one switch per kind of source:
-`built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:`, `cmd:`, `regex:` and
+`built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:`, `cmd:`, `regex:`, `mqtt:` and
 `http:`.
 
 The named web addresses `http:` refers to live in `~/.config/g13/endpoints.json`, where an address
@@ -490,7 +490,7 @@ sides and compares the frames byte for byte - a preview that disagrees with the 
 be worse than no preview at all.
 
 Data sources are named in an applet's JSON: a plain name (`cpu`, `memory`, `time`, ...), or
-`env:NAME`, `file:PATH`, `cmd:COMMAND`, `json:PATH#FIELD`, `regex:PATH#PATTERN` and `http:<endpoint>/<path>#field` for
+`env:NAME`, `file:PATH`, `cmd:COMMAND`, `json:PATH#FIELD`, `regex:PATH#PATTERN`, `mqtt:<endpoint>/<topic>#field` and `http:<endpoint>/<path>#field` for
 anything else. `http:` reads a web address, using the same `#field` convention as `json:`, and the
 endpoint - address, headers, token, timeout - is a named entry in `endpoints.json` rather than
 something written into the applet. Everything that can go wrong (no such endpoint, refused, timed
