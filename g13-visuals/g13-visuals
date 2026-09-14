@@ -262,9 +262,10 @@ class _Blank(dict):
 #: names against this, and VisualsTest checks every name here still resolves, so the two cannot
 #: drift apart.
 BUILT_IN_SOURCES = (
-    "cpu", "memory", "load", "uptime", "uptime_seconds", "time", "date", "day",
+    "cpu", "memory", "load", "uptime", "uptime_seconds", "time", "time_seconds", "date", "day",
     "media_status", "media_artist", "media_title", "media_position", "media_duration",
     "media_percent", "profile", "recording", "last_key", "recent_keys",
+    "screen_width", "screen_height",
 )
 
 #: Sources that read from outside, named by where they read from rather than by what is there.

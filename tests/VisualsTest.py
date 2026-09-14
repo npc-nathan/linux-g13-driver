@@ -433,6 +433,15 @@ check("a source switched off is noticed", True, switched != before_sources)
 sources_file.unlink()
 check("and switching it back on is noticed", True, gv.config_stamp_now() != switched)
 
+# The designer lists the names an applet may use, so it has to list exactly the daemon's own -
+# a name offered in the window that the daemon does not have would be a name that does nothing.
+_designer_source = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                                     "g13-config-tool/src/main/java/com/booker/g13",
+                                     "DesignerPanel.java")).read()
+_designer_names = re.findall(r'VARIABLES\.put\("([a-z_]+)"', _designer_source)
+check("the designer offers every built-in name the daemon has", sorted(gv.BUILT_IN_SOURCES),
+      sorted(_designer_names))
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:

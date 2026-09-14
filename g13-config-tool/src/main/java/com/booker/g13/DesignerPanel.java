@@ -4,6 +4,7 @@ import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JTabbedPane;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -49,6 +50,38 @@ import java.util.Map;
  */
 public class DesignerPanel {
 
+    /** Every name an applet may use, and what it reads, for the "what it can read" tab.
+     *
+     * A test compares this list against the daemon's own, so a name added on one side and not the
+     * other fails the build rather than quietly doing nothing on the pad.
+     */
+    public static final java.util.LinkedHashMap<String, String> VARIABLES =
+            new java.util.LinkedHashMap<>();
+
+    static {
+        VARIABLES.put("cpu", "how busy the processor is, as a percentage");
+        VARIABLES.put("memory", "how much memory is in use, as a percentage");
+        VARIABLES.put("load", "the one-minute load average");
+        VARIABLES.put("uptime", "how long the machine has been up, as 3h07m");
+        VARIABLES.put("uptime_seconds", "the same in seconds, for arithmetic");
+        VARIABLES.put("time", "the time, as 21:14");
+        VARIABLES.put("time_seconds", "the time including seconds");
+        VARIABLES.put("date", "today's date, as 14/09/2026");
+        VARIABLES.put("day", "the day of the week, three letters");
+        VARIABLES.put("media_status", "playing, paused or stopped");
+        VARIABLES.put("media_artist", "who is playing");
+        VARIABLES.put("media_title", "what is playing");
+        VARIABLES.put("media_position", "how far into the track, as 1:07");
+        VARIABLES.put("media_duration", "how long the track is");
+        VARIABLES.put("media_percent", "how far through, as a number");
+        VARIABLES.put("profile", "the selected profile, as M1, M2 or M3");
+        VARIABLES.put("recording", "yes or no: is record mode on");
+        VARIABLES.put("last_key", "the last key pressed, as a number");
+        VARIABLES.put("recent_keys", "the last few keys pressed");
+        VARIABLES.put("screen_width", "the screen's width in pixels, 160");
+        VARIABLES.put("screen_height", "the visible height, 43");
+    }
+
     /** The fields that hold a number, so the window can offer a spinner for them. */
     private static final List<String> NUMERIC = List.of("x", "y", "w", "h", "max", "count", "len",
             "thick", "size", "r", "margin", "scroll_width", "scroll_speed");
@@ -69,6 +102,9 @@ public class DesignerPanel {
     private final JComboBox<String> addType =
             new JComboBox<>(AppletEditor.TYPES.toArray(new String[0]));
     private final JLabel status = new JLabel(" ");
+    private final JLabel meaning = new JLabel(" ");
+    private final DefaultListModel<String> variableModel = new DefaultListModel<>();
+    private final JTextArea readings = new JTextArea(4, 30);
     private AppletEditor editor;
 
     /** True while the window is filling its own fields in, so their listeners do not write back. */
@@ -181,18 +217,12 @@ public class DesignerPanel {
         up.addActionListener(event -> move(-1));
         down.addActionListener(event -> move(1));
 
-        final JPanel right = new JPanel(new BorderLayout(4, 4));
-        right.add(new JScrollPane(widgetFields), BorderLayout.CENTER);
-
-        final JPanel aliases = new JPanel(new BorderLayout(4, 2));
-        aliases.add(new JLabel("sources:  name = spec, one per line  "
-                + "(e.g. ammo = json:~/.config/g13/hud.json#ammo)"), BorderLayout.NORTH);
-        aliasesArea.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
-        aliases.add(new JScrollPane(aliasesArea), BorderLayout.CENTER);
-        right.add(aliases, BorderLayout.SOUTH);
+        final JTabbedPane right = new JTabbedPane();
+        right.addTab("the selected widget", new JScrollPane(widgetFields));
+        right.addTab("what it can read", readableTab());
 
         final JSplitPane middle = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                wrap("widgets, drawn in this order", widgetColumn), wrap("the selected widget", right));
+                wrap("widgets, drawn in this order", widgetColumn), right);
         middle.setResizeWeight(0.36);
         top.add(middle, BorderLayout.CENTER);
 
@@ -252,6 +282,129 @@ public class DesignerPanel {
         return top;
     }
 
+    /** Everything this applet can put in a format string, and what it reads right now. */
+    private JPanel readableTab() {
+        final JPanel panel = new JPanel(new BorderLayout(4, 4));
+
+        showVariables();
+        final JList<String> list = new JList<>(variableModel);
+        list.setVisibleRowCount(12);
+        list.addListSelectionListener(event -> {
+            final String name = list.getSelectedValue();
+            if (name != null) {
+                meaning.setText(VARIABLES.containsKey(name) ? VARIABLES.get(name)
+                        : "this applet's own: " + editor.sources().get(name));
+            }
+        });
+        list.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(final java.awt.event.MouseEvent event) {
+                if (event.getClickCount() == 2) {
+                    insertVariable(list.getSelectedValue());
+                }
+            }
+        });
+
+        final JPanel top = new JPanel(new BorderLayout(4, 2));
+        top.add(new JLabel("double-click one to add it to the selected widget's format"),
+                BorderLayout.NORTH);
+        final JScrollPane listScroll = new JScrollPane(list);
+        listScroll.setPreferredSize(new java.awt.Dimension(260, 150));
+        top.add(listScroll, BorderLayout.CENTER);
+        panel.add(top, BorderLayout.NORTH);
+        panel.add(meaning, BorderLayout.CENTER);
+
+        final JPanel bottom = new JPanel(new BorderLayout(4, 2));
+        final JButton look = new JButton("Read them now");
+        look.setToolTipText("Ask g13-applet what this applet's own sources read at this moment");
+        look.addActionListener(event -> readNow());
+        bottom.add(look, BorderLayout.NORTH);
+
+        final JPanel aliases = new JPanel(new BorderLayout(4, 2));
+        aliases.add(new JLabel(sourcesHelp()), BorderLayout.NORTH);
+        aliasesArea.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+        aliasesArea.setRows(3);
+        aliases.add(new JScrollPane(aliasesArea), BorderLayout.CENTER);
+        bottom.add(aliases, BorderLayout.CENTER);
+
+        readings.setFont(new java.awt.Font("Monospaced", java.awt.Font.PLAIN, 12));
+        readings.setRows(4);
+        readings.setEditable(false);
+        bottom.add(new JScrollPane(readings), BorderLayout.SOUTH);
+        panel.add(bottom, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    /** The built-in names first, then this applet's own, rebuilt when an alias is added or removed. */
+    private void showVariables() {
+        variableModel.clear();
+        for (final String name : VARIABLES.keySet()) {
+            variableModel.addElement(name);
+        }
+        for (final String alias : editor.sources().keySet()) {
+            variableModel.addElement(alias);
+        }
+    }
+
+    private static String sourcesHelp() {
+        return "this applet's own sources:  name = spec, one per line  "
+                + "(e.g. ammo = json:/home/you/hud.json#ammo, or home = http:ha/api/states/sensor.x#state)";
+    }
+
+    /** Adds {name} to the selected widget, which is the only way a name reaches the screen. */
+    private void insertVariable(final String name) {
+        if (name == null) {
+            return;
+        }
+        if (selected < 0 || selected >= editor.widgets().size()) {
+            status.setText("pick a widget first - a name only means something inside a widget");
+            return;
+        }
+        final Object format = editor.widgets().get(selected).get("format");
+        final String updated = (format == null ? "" : String.valueOf(format)) + "{" + name + "}";
+        editor.set(selected, "format", updated);
+        save();
+        showFieldsFor(selected);
+        refreshList(selected);
+        refreshPreview();
+    }
+
+    /** Asks the repository's own checker what this applet's sources read at this moment. */
+    private void readNow() {
+        final java.io.File checker = checkerPath();
+        if (checker == null) {
+            readings.setText("cannot find g13-applet. It is installed with the driver:\n"
+                    + "  make install-user        (puts it in ~/.local/bin)");
+            return;
+        }
+        try {
+            final Process process = new ProcessBuilder(checker.getAbsolutePath(), "check",
+                    AppletEditor.path(appletName).toString(), "--values")
+                    .redirectErrorStream(true).start();
+            // Quick enough to run in place: it is one file, and a few sources at most.
+            final String output = new String(process.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            process.waitFor();
+            readings.setText(output);
+            readings.setCaretPosition(0);
+        } catch (IOException | InterruptedException failed) {
+            readings.setText("cannot run g13-applet: " + failed.getMessage());
+        }
+    }
+
+    /** Where the checker is, if it is installed. */
+    private static java.io.File checkerPath() {
+        final String home = System.getProperty("user.home", "");
+        for (final String candidate : new String[]{home + "/.local/bin/g13-applet",
+                "/usr/local/bin/g13-applet", "/usr/bin/g13-applet"}) {
+            final java.io.File file = new java.io.File(candidate);
+            if (file.canExecute()) {
+                return file;
+            }
+        }
+        return null;
+    }
+
     private JPanel wrap(final String title, final java.awt.Component inside) {
         final JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createTitledBorder(title));
@@ -291,6 +444,7 @@ public class DesignerPanel {
         }
         editor.sources().clear();
         editor.sources().putAll(wanted);
+        showVariables();
     }
 
     private void move(final int delta) {

@@ -473,6 +473,11 @@ writes the same file, and nothing about it is hidden in the window.
   deliberately does not carry its own copy of those rules.
 - Widgets can be added, removed, duplicated and reordered. The fields offered are the ones the
   selected widget type actually uses, so a text line never offers a bar's width.
+- **What it can read** is the second tab: every name an applet may use with a line saying what it
+  is, this applet's own sources, and **Read them now**, which runs `g13-applet check --values` and
+  shows what each of them reads at that moment. Double-click a name to add it to the selected
+  widget's format. The list of built-in names is compared against the daemon's own by a test, so
+  the window cannot offer a name that does nothing on the pad.
 - **sources** is the applet's own aliases, one `name = spec` per line — this is how an applet says
   where its numbers come from, including `json:` files written by something else.
 
