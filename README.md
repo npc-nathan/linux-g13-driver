@@ -109,6 +109,7 @@ back after a change, `make enable-services` (or `g13-service start all`). To tak
 | `g13-buttons` | says or sets who owns the screen and the four buttons (`auto`, `visuals`, `sdk`) |
 | `g13-service` | start, stop or restart the services, with a desktop notification |
 | `g13-keywatch` / `g13-watch` | what the pad sends / the event bus it publishes |
+| `g13-applet` | checks an applet before it reaches the pad (`g13-applet check FILE`, `--all`) |
 | `liblogitechlcd.so`, `LogitechLcd.h` | the Logitech LCD SDK for programs here; `LogitechLcd.dll` for Windows ones |
 
 The menu entries (`G13 Configuration`, `G13 Start Driver`, `G13 Stop Driver`, `G13 Start All`,
@@ -468,6 +469,15 @@ whatever was there before. It is keyed on the program *running*, not on a window
 so alt-tabbing does not make the screen flicker, and a visual you pick by hand while it runs is
 respected until the program goes away. Without that line an applet is only shown because
 somebody chose it. The Cyberpunk applet is the one that uses it.
+
+**Check an applet before it reaches the pad.** `g13-applet check FILE` (or `--all`) reads the
+file, reports a widget type nothing draws, a field that is not the type it should be, a format
+string that cannot be read, and a source name that is neither declared nor built in — then draws
+it and reports text that lands on ink. Two extras matter when designing one: `--values` prints
+what every source the applet asks for reads right now, and `--screen` draws the 160x43 screen as
+ASCII art, `#` for ink, `.` where text sits and `!` where the two collide. The drawing and the ink
+rule come from the daemon itself, so the tool cannot disagree with the pad, and `make test` checks
+that the lists it argues from still match the code.
 
 An applet can give its sources short names, so widgets and formats do not repeat a path -
 `"sources": {"ammo": "json:~/hud.json#ammo"}`, then `{"type": "text", "format": "AMMO {ammo}"}`.

@@ -66,6 +66,10 @@ run "the screen window and the button mode" env XDG_CONFIG_HOME="$SCRATCH/config
     java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" "$TESTS/ScreenPanelTest.java"
 
 echo
+echo "The applet tool"
+run "checking applets, and the lists it checks against" python3 "$TESTS/AppletToolTest.py"
+
+echo
 echo "The Cyberpunk 2077 mod"
 run "the mod, without the game" python3 "$TESTS/cet-mod-test.py"
 

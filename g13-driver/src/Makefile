@@ -132,6 +132,7 @@ install:
 	# The service manager, and the menu entries that use it
 	install -m 755 scripts/g13-service $(DESTDIR)$(BINDIR)/g13-service
 	install -m 755 scripts/g13-buttons $(DESTDIR)$(BINDIR)/g13-buttons
+	install -m 755 scripts/g13-applet $(DESTDIR)$(BINDIR)/g13-applet
 	install -m 755 lcdsdk/g13-lcd-bridge $(DESTDIR)$(BINDIR)/g13-lcd-bridge
 	install -d $(DESTDIR)$(APPDIR)
 	for entry in ../../desktop/*.desktop; do \
@@ -176,8 +177,9 @@ install-user:
 	cp scripts/g13-lcd $(USER_INSTALL_DIR)/g13-lcd
 	cp scripts/g13-watch $(USER_INSTALL_DIR)/g13-watch
 	cp scripts/g13-buttons $(USER_INSTALL_DIR)/g13-buttons
+	cp scripts/g13-applet $(USER_INSTALL_DIR)/g13-applet
 	cp scripts/g13lcd.py $(USER_INSTALL_DIR)/g13lcd.py
-	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch $(USER_INSTALL_DIR)/g13-buttons
+	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch $(USER_INSTALL_DIR)/g13-buttons $(USER_INSTALL_DIR)/g13-applet
 	
 	# Screen visuals (applets and menu)
 	cp ../../g13-visuals/g13-visuals $(USER_INSTALL_DIR)/g13-visuals
@@ -257,7 +259,7 @@ clean: clean-build
 
 # Everything both install targets put in a bin directory.
 INSTALLED_BINS := linux-g13-driver g13-gui $(GUI_JAR_NAME) g13-keywatch g13-lcd g13-watch \
-                  g13-buttons g13lcd.py g13-visuals g13-lcd-bridge g13-service
+                  g13-buttons g13-applet g13lcd.py g13-visuals g13-lcd-bridge g13-service
 INSTALLED_UNITS := g13.service g13-visuals.service g13-lcd-bridge.service
 
 uninstall-user:

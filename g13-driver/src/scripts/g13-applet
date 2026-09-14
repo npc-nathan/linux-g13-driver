@@ -1,0 +1,352 @@
+#!/usr/bin/env python3
+"""g13-applet - check a designed applet before it reaches the pad.
+
+    g13-applet check FILE [FILE ...] [--screen] [--values] [--json]
+    g13-applet check --all
+
+An applet is a JSON file in ~/.config/g13/applets/. This reads one, checks its shape, draws it
+with the values it asks for, and reports anything that cannot work on the panel:
+
+  * a widget type nothing draws
+  * a number that is not a number
+  * a format string that cannot be read (these show up as "?" on the screen)
+  * a source name that is neither a declared alias nor built in - nearly always a typo
+  * and the one that matters most: text landing on filled pixels, which is invisible, because
+    the panel has one colour of ink
+
+The drawing and the ink rule come from the visuals daemon itself, so this argues from the same
+renderer the pad uses rather than from a second opinion.
+
+    --screen   the 160x43 screen as ASCII art: # is ink, . is where text sits, ! is where the
+               two collide
+    --values   what every source the applet asks for reads right now
+    --json     the problems as JSON, for a build script
+
+Exit codes: 0 clean, 1 problems found, 2 could not run.
+"""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import string
+import sys
+from pathlib import Path
+
+#: Fields a widget may carry a number in.
+NUMBER_FIELDS = ("x", "y", "w", "h", "r", "count", "len", "thick", "margin", "size",
+                 "seconds", "scroll_width", "scroll_speed", "max")
+
+ALIGNMENTS = (None, "left", "centre", "right")
+
+#: Values a format spec is tried against. A spec no plausible value accepts would put "?" on the
+#: screen at run time, which is a mistake in the applet rather than missing data.
+PROBES = (0, 0.0, "", "x", True)
+
+
+def daemon_module():
+    """The visuals daemon as a module. It does the drawing, so there is one renderer."""
+    here = Path(__file__).resolve().parent
+    for candidate in (os.environ.get("G13_VISUALS"),
+                      here / "g13-visuals",
+                      here.parents[2] / "g13-visuals" / "g13-visuals"):
+        if candidate and Path(candidate).is_file():
+            loader = importlib.machinery.SourceFileLoader("g13_visuals", str(candidate))
+            spec = importlib.util.spec_from_loader("g13_visuals", loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["g13_visuals"] = module
+            loader.exec_module(module)
+            return module
+    sys.exit("cannot find the g13-visuals daemon (set G13_VISUALS to its path)")
+
+
+def fields_in(template):
+    """The source names a format string asks for, without the field access after them."""
+    names = []
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError:
+        return names
+    for _literal, field, _spec, _conversion in parsed:
+        if field:
+            names.append(field.split(".")[0].split("[")[0])
+    return names
+
+
+def format_problems(template, where):
+    """Format strings that cannot be read: they put "?" on the screen at run time."""
+    problems = []
+    try:
+        parsed = list(string.Formatter().parse(template))
+    except ValueError as error:
+        return ["%s: format %r cannot be parsed: %s" % (where, template, error)]
+
+    for _literal, field, spec, conversion in parsed:
+        if not field:
+            continue
+        if field[0].isdigit():
+            problems.append("%s: format %r uses a positional field; name it instead"
+                            % (where, template))
+        trial = "{%s%s%s}" % (field, "!" + conversion if conversion else "",
+                              ":" + spec if spec else "")
+        accepted = False
+        for probe in PROBES:
+            try:
+                trial.format(**{field: probe})
+                accepted = True
+                break
+            except (ValueError, TypeError, KeyError, IndexError):
+                continue
+        if not accepted:
+            problems.append("%s: format %r cannot be read with any kind of value (%r)"
+                            % (where, template, spec or conversion))
+    return problems
+
+
+def source_problems(widget, where, aliases, daemon):
+    """Source names that resolve to nothing: nearly always a typo."""
+    named = []
+    if widget.get("source"):
+        named.append(str(widget["source"]))
+    named.extend(fields_in(widget.get("format") or ""))
+
+    problems = []
+    for name in named:
+        if name in aliases or name in daemon.BUILT_IN_SOURCES:
+            continue
+        if name.startswith(daemon.SOURCE_PREFIXES):
+            continue
+        problems.append("%s: %r is not an alias, not built in, and has no %s prefix"
+                        % (where, name, "/".join(daemon.SOURCE_PREFIXES)))
+    return problems
+
+
+def structural_problems(definition, daemon):
+    """Everything wrong with the file before anything is drawn."""
+    if not isinstance(definition, dict):
+        return ["the file has to be a JSON object"]
+
+    problems = []
+    widgets = definition.get("widgets")
+    if not isinstance(widgets, list):
+        problems.append("'widgets' has to be a list")
+        widgets = []
+    elif not widgets:
+        problems.append("this applet has no widgets, so it would draw only its title")
+
+    aliases = definition.get("sources") or {}
+    if not isinstance(aliases, dict):
+        problems.append("'sources' has to be an object of short names")
+        aliases = {}
+    for name, spec in aliases.items():
+        if not isinstance(spec, str) or not spec:
+            problems.append("source %r has to be a string like 'json:/path#field'" % name)
+        elif not spec.startswith(daemon.SOURCE_PREFIXES) and spec not in daemon.BUILT_IN_SOURCES:
+            problems.append("source %r is %r: not built in, and no %s prefix"
+                            % (name, spec, "/".join(daemon.SOURCE_PREFIXES)))
+
+    if "interval" in definition and not isinstance(definition["interval"], (int, float)):
+        problems.append("'interval' has to be a number of seconds")
+
+    follow = definition.get("follow")
+    if follow is not None and not isinstance(follow, (bool, int, float, dict)):
+        problems.append("'follow' has to be true, a number of seconds, or {\"seconds\": N}")
+    elif isinstance(follow, dict) and not isinstance(follow.get("seconds", 20), (int, float)):
+        problems.append("'follow': {\"seconds\": N} needs N to be a number")
+
+    for index, widget in enumerate(widgets, start=1):
+        where = "widget %d" % index
+        if not isinstance(widget, dict):
+            problems.append("%s is not an object" % where)
+            continue
+        kind = widget.get("type", "text")
+        if kind not in daemon.WIDGET_TYPES:
+            problems.append("%s: nothing draws a %r widget (known: %s)"
+                            % (where, kind, ", ".join(daemon.WIDGET_TYPES)))
+        if widget.get("align") not in ALIGNMENTS:
+            problems.append("%s: 'align' is %r; use left, centre or right"
+                            % (where, widget.get("align")))
+        for field in NUMBER_FIELDS:
+            if field in widget and not isinstance(widget[field], (int, float)):
+                problems.append("%s: %r has to be a number, not %r"
+                                % (where, field, widget[field]))
+        if isinstance(widget.get("format"), str):
+            problems.extend(format_problems(widget["format"], where))
+        elif widget.get("format") is not None:
+            problems.append("%s: 'format' has to be a string" % where)
+        problems.extend(source_problems(widget, where, aliases, daemon))
+    return problems
+
+
+def ascii_screen(daemon, lines):
+    """The screen as text: ink, where the text sits, and where the two collide."""
+    width, height = daemon.g13lcd.VISIBLE_WIDTH, daemon.g13lcd.VISIBLE_HEIGHT
+    try:
+        frame = bytes.fromhex(lines[0].split(" ", 1)[1])
+    except (IndexError, ValueError):
+        return "(nothing drawn)"
+
+    grid = [[" "] * width for _ in range(height)]
+    for y in range(height):
+        for x in range(width):
+            index = x + (y // 8) * daemon.g13lcd.WIDTH
+            if index < len(frame) and frame[index] & (1 << (y % 8)):
+                grid[y][x] = "#"
+
+    for line in lines[1:]:
+        parts = line.split(" ", 3)
+        if parts[0] != "#text" or len(parts) < 3:
+            continue
+        x, y = int(parts[1]), int(parts[2])
+        message = parts[3] if len(parts) > 3 else ""
+        for column in range(x, x + len(message) * daemon.g13lcd.CHAR_WIDTH):
+            for row in range(y, y + daemon.g13lcd.TEXT_HEIGHT):
+                if 0 <= column < width and 0 <= row < height:
+                    grid[row][column] = "!" if grid[row][column] == "#" else "."
+    return "\n".join("".join(row) for row in grid)
+
+
+OVERLAP = re.compile(r"^(?P<what>.*) overlaps filled pixels at \((?P<x>\d+),(?P<y>\d+)\)$")
+
+
+def summarise(problems):
+    """One line per thing, rather than one per pixel.
+
+    The rule in the daemon reports every colliding pixel, which is what a test wants and what
+    nobody can read: a 26 character label on a filled box is 182 lines. This turns each quoted
+    text into a count and where it starts instead.
+    """
+    counted = {}
+    order = []
+    for problem in problems:
+        match = OVERLAP.match(problem)
+        if not match:
+            order.append(problem)
+            continue
+        what = match.group("what")
+        if what not in counted:
+            counted[what] = {"pixels": 0,
+                             "first": (int(match.group("x")), int(match.group("y"))),
+                             "last": (int(match.group("x")), int(match.group("y")))}
+            order.append(what)
+        entry = counted[what]
+        entry["pixels"] += 1
+        entry["last"] = (int(match.group("x")), int(match.group("y")))
+
+    lines = []
+    for item in order:
+        if item in counted:
+            entry = counted[item]
+            lines.append("%s sits on %d filled pixel%s, from %s to %s"
+                         % (item, entry["pixels"], "" if entry["pixels"] == 1 else "s",
+                            entry["first"], entry["last"]))
+        else:
+            lines.append(item)
+    return lines
+
+
+def check(path, daemon, options):
+    """Checks one applet. Returns (problems, visual, values)."""
+    try:
+        definition = json.loads(Path(path).read_text())
+    except OSError as error:
+        return ["cannot read %s: %s" % (path, error)], None, None
+    except ValueError as error:
+        return ["%s is not valid JSON: %s" % (path, error)], None, None
+
+    problems = structural_problems(definition, daemon)
+
+    values = daemon.Values()
+    try:
+        visual = daemon.LayoutVisual(definition, values)
+    except Exception as error:
+        problems.append("the daemon cannot build this applet: %s: %s"
+                        % (type(error).__name__, error))
+        return problems, None, values
+    if not options.json_only:
+        try:
+            problems.extend(daemon.layout_problems(visual))
+        except Exception as error:
+            problems.append("drawing it failed: %s: %s" % (type(error).__name__, error))
+    return problems, visual, values
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="g13-applet",
+        description="Check a designed applet before it reaches the pad.")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    checker = subcommands.add_parser("check", help="check one or more applet files")
+    checker.add_argument("files", nargs="*", help="applet JSON files")
+    checker.add_argument("--all", action="store_true",
+                         help="every applet in the applets directory")
+    checker.add_argument("--screen", action="store_true",
+                         help="draw the screen: # ink, . text, ! where they collide")
+    checker.add_argument("--values", action="store_true",
+                         help="what each source the applet asks for reads right now")
+    checker.add_argument("--json", action="store_true", dest="json_only",
+                         help="problems as JSON, for a build script")
+    options = parser.parse_args(argv)
+
+    daemon = daemon_module()
+
+    paths = list(options.files)
+    if options.all:
+        directory = daemon.applet_dir()
+        paths += [str(path) for path in sorted(directory.glob("*.json"))]
+        if not paths:
+            print("no applets in %s" % directory)
+            return 2
+    if not paths:
+        parser.error("name an applet file, or use --all")
+
+    report = {}
+    failed = 0
+    for path in paths:
+        problems, visual, values = check(path, daemon, options)
+        lines = summarise(problems)
+        report[os.path.basename(path)] = lines
+        if problems:
+            failed += 1
+
+        if options.json_only:
+            continue
+
+        print("%s: %s" % (os.path.basename(path),
+                          "ok" if not lines else "%d problem%s" % (len(lines),
+                                                                   "" if len(lines) == 1 else "s")))
+        for line in lines:
+            print("    %s" % line)
+
+        if options.values and visual is not None:
+            print("  what it reads now:")
+            for name in visual.asked_names():
+                spec = visual.spec_of(name)
+                print("    %-16s %-56s %r" % (name, spec[:56], values.raw(spec)))
+
+        if options.screen and visual is not None:
+            screen = daemon.Screen()
+            try:
+                visual.render(screen, {})
+                print(ascii_screen(daemon, screen.lines()))
+            except Exception as error:
+                print("  cannot draw it: %s: %s" % (type(error).__name__, error))
+        if not options.json_only and len(paths) > 1:
+            print()
+
+    if options.json_only:
+        print(json.dumps(report, indent=2))
+    elif len(paths) > 1:
+        print("%d of %d clean" % (len(paths) - failed, len(paths)))
+
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

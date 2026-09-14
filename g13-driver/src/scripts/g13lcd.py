@@ -25,6 +25,9 @@ HEIGHT = 48
 # test pattern draws its frame in.)
 VISIBLE_WIDTH = 160
 VISIBLE_HEIGHT = 43
+#: The driver's font: 5x7 glyphs on a 6 pixel advance, 7 rows tall.
+CHAR_WIDTH = 6
+TEXT_HEIGHT = 7
 
 FRAME_BYTES = WIDTH * HEIGHT // 8  # 960
 

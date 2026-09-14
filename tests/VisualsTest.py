@@ -110,22 +110,10 @@ e.on_state("profile", "2")
 check("profile state kept", 2, e.profile)
 
 # --- the layout rule: text must land on blank pixels, or it is invisible ---
+# The rule itself lives in the daemon, so the tool, the config tool's preview and this suite all
+# work from one implementation.
 def assert_text_on_blank_pixels(engine, label):
-    lines = engine.tick()
-    frame = bytes.fromhex(lines[0].split(" ")[1])
-    problems = []
-    for line in lines[1:]:
-        parts = line.split(" ", 3)
-        x, y = int(parts[1]), int(parts[2])
-        message = parts[3] if len(parts) > 3 else ""
-        if y < 0 or y + 7 > gv.g13lcd.VISIBLE_HEIGHT:
-            problems.append("text off the visible screen: %r at y=%d" % (message, y))
-        for column in range(x, x + len(message) * 6):
-            for row in range(y, y + 7):
-                index = column + (row // 8) * gv.g13lcd.WIDTH
-                if frame[index] & (1 << (row % 8)):
-                    problems.append("%r overlaps filled pixels at (%d,%d)" % (message, column, row))
-    check("layout: " + label, [], problems)
+    check("layout: " + label, [], gv.text_problems(engine.tick()))
 
 
 for name in ("clock", "system", "media", "pad", "custom"):
@@ -254,6 +242,30 @@ check("a file written just now is young against either clock", True,
       gv.source_age("file:/tmp/visualstest/somefile.txt", time.monotonic()) < 60)
 check("and against no clock at all", True,
       gv.source_age("file:/tmp/visualstest/somefile.txt") < 60)
+
+# --- the lists `g13-applet check` argues from have to match what the daemon really does ------
+# It tells authors about a widget type nothing draws, or a source name that is not one, so those
+# lists drifting from the code would make the tool lie in both directions.
+for kind in gv.WIDGET_TYPES:
+    failure = None
+    try:
+        definition = {"name": "widget-" + kind, "interval": 1,
+                      "widgets": [{"type": kind, "x": 30, "y": 14, "w": 40, "h": 6, "count": 6,
+                                   "len": 3, "thick": 1, "r": 5, "size": 9, "source": "cpu",
+                                   "max": 100, "format": "x {cpu:.0f}"}]}
+        screen = gv.Screen()
+        gv.LayoutVisual(definition, values).render(screen, {})
+    except Exception as error:
+        failure = "%s: %s" % (type(error).__name__, error)
+    check("the tool's widget type %r really draws" % kind, None, failure)
+
+for name in gv.BUILT_IN_SOURCES:
+    failure = None
+    try:
+        values.resolve(name)
+    except Exception as error:
+        failure = "%s: %s" % (type(error).__name__, error)
+    check("the tool's built-in source %r really resolves" % name, None, failure)
 
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)

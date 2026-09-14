@@ -249,6 +249,88 @@ class _Blank(dict):
         return ""
 
 
+#: The data sources the daemon answers by itself. `g13-applet check` tests an applet's source
+#: names against this, and VisualsTest checks every name here still resolves, so the two cannot
+#: drift apart.
+BUILT_IN_SOURCES = (
+    "cpu", "memory", "load", "uptime", "uptime_seconds", "time", "date", "day",
+    "media_status", "media_artist", "media_title", "media_position", "media_duration",
+    "media_percent", "profile", "recording", "last_key", "recent_keys",
+)
+
+#: Sources that read from outside, named by where they read from rather than by what is there.
+SOURCE_PREFIXES = ("env:", "file:", "cmd:", "json:")
+
+#: The widgets a designed applet may use.
+WIDGET_TYPES = ("text", "bar", "segments", "brackets", "arrow", "turn", "line", "vline", "box")
+
+
+def number_or(value, default):
+    """A number from a hand-written JSON file, or the default if it is not one.
+
+    Applets are files people edit by hand, so a wrong type is an ordinary mistake rather than a
+    reason to fail: the daemon keeps drawing with the default, and `g13-applet check` is what
+    tells the author about it.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def text_problems(lines, width=None, height=None):
+    """Everything wrong with the text in one drawn screen, as the driver would see it.
+
+    The panel has one colour of ink and text is drawn over the pixels, so text that lands on a
+    filled pixel is invisible; text below the visible rows, or running past the right edge, never
+    shows either. `lines` is the driver's protocol - the `#bitmap` frame and the `#text` lines
+    after it - so what is checked is what would actually be sent to the pad.
+
+    Shared on purpose: the tool's preview, `g13-applet check` and the test suite use this one
+    rule rather than each having an opinion. It used to live in the test suite alone.
+    """
+    width = g13lcd.VISIBLE_WIDTH if width is None else width
+    height = g13lcd.VISIBLE_HEIGHT if height is None else height
+    if not lines:
+        return ["nothing was drawn"]
+    if not lines[0].startswith("#bitmap "):
+        return ["the first line is not a frame: %r" % str(lines[0])[:40]]
+    try:
+        frame = bytes.fromhex(lines[0].split(" ", 1)[1])
+    except ValueError:
+        return ["the frame is not hex"]
+
+    problems = []
+    for line in lines[1:]:
+        parts = line.split(" ", 3)
+        if parts[0] != "#text" or len(parts) < 3:
+            continue
+        x, y = int(parts[1]), int(parts[2])
+        message = parts[3] if len(parts) > 3 else ""
+        if y < 0 or y + g13lcd.TEXT_HEIGHT > height:
+            problems.append("text off the visible screen: %r at y=%d" % (message, y))
+        if x < 0 or x + len(message) * g13lcd.CHAR_WIDTH > width:
+            problems.append("text off the visible screen: %r runs to x=%d"
+                            % (message, x + len(message) * g13lcd.CHAR_WIDTH))
+        for column in range(max(0, x), min(width, x + len(message) * g13lcd.CHAR_WIDTH)):
+            for row in range(max(0, y), min(height, y + g13lcd.TEXT_HEIGHT)):
+                index = column + (row // 8) * g13lcd.WIDTH
+                if index < len(frame) and frame[index] & (1 << (row % 8)):
+                    problems.append("%r overlaps filled pixels at (%d,%d)" % (message, column, row))
+    return problems
+
+
+def layout_problems(visual, context=None):
+    """The same check for one visual: draw it, and look at what came out."""
+    screen = Screen()
+    visual.render(screen, context or {})
+    return text_problems(screen.lines())
+
+
 def centred(message, width=None):
     """Left padding that centres a string on the screen."""
     width = width or g13lcd.VISIBLE_WIDTH
@@ -262,8 +344,8 @@ def scrolling(message, widget, now=None):
     matters. The line wraps round with a gap between its end and its start, so a title that
     fits is left alone and one that does not is readable in a single pass.
     """
-    window = int(widget.get("scroll_width", 25))
-    speed = float(widget.get("scroll_speed", 3))
+    window = int(number_or(widget.get("scroll_width"), 25)) or 25
+    speed = float(number_or(widget.get("scroll_speed"), 3))
     if len(message) <= window:
         return message
     padded = message + "   "
@@ -638,7 +720,7 @@ class LayoutVisual:
         self.definition = definition
         self.values = values
         self.name = APPLET_PREFIX + str(definition.get("name", "applet"))
-        self.interval = float(definition.get("interval", 1.0))
+        self.interval = max(0.05, float(number_or(definition.get("interval"), 1.0)))
         #: Short names for data sources, so a widget can say {"source": "ammo"} and a
         #: format can say {ammo} instead of repeating a path in full:
         #: "sources": {"ammo": "json:~/hud.json#ammo"}
@@ -714,8 +796,8 @@ class LayoutVisual:
 
         for widget in self.definition.get("widgets", []):
             kind = widget.get("type", "text")
-            x = int(widget.get("x", 0))
-            y = int(widget.get("y", 0))
+            x = self.geometry(widget, "x", 0)
+            y = self.geometry(widget, "y", 0)
 
             if kind == "text":
                 template = widget.get("format")
@@ -738,7 +820,7 @@ class LayoutVisual:
                 # Alignment is computed from the text, so a design can pin a value to the
                 # right edge without knowing how wide the number will be.
                 align = widget.get("align")
-                margin = int(widget.get("margin", 3))
+                margin = self.geometry(widget, "margin", 3)
                 if align == "centre":
                     x = centred(message)
                 elif align == "right":
@@ -746,40 +828,56 @@ class LayoutVisual:
                 screen.text(x, y, message)
 
             elif kind == "bar":
-                top = float(widget.get("max", 100)) or 100
+                top = self.number(widget, "max", 100) or 100
                 try:
                     percent = 100.0 * float(self.value_of(widget.get("source"))) / top
                 except (TypeError, ValueError):
                     percent = 0
-                screen.bar(x, y, int(widget.get("w", 88)), int(widget.get("h", 8)), percent)
+                screen.bar(x, y, self.geometry(widget, "w", 88), self.geometry(widget, "h", 8),
+                           percent)
 
             elif kind == "line":
-                screen.rect(x, y, x + int(widget.get("w", 158)), y + 1)
+                screen.rect(x, y, x + self.geometry(widget, "w", 158), y + 1)
 
             elif kind == "box":
-                screen.rect(x, y, x + int(widget.get("w", 158)), y + int(widget.get("h", 10)))
+                screen.rect(x, y, x + self.geometry(widget, "w", 158),
+                            y + self.geometry(widget, "h", 10))
 
             elif kind == "segments":
-                top = float(widget.get("max", 100)) or 100
+                top = self.number(widget, "max", 100) or 100
                 try:
                     percent = 100.0 * float(self.value_of(widget.get("source"))) / top
                 except (TypeError, ValueError):
                     percent = 0
-                screen.segments(x, y, int(widget.get("w", 88)), int(widget.get("h", 6)),
-                                int(widget.get("count", 12)), percent)
+                screen.segments(x, y, self.geometry(widget, "w", 88), self.geometry(widget, "h", 6),
+                                self.geometry(widget, "count", 12), percent)
 
             elif kind == "brackets":
-                screen.brackets(x, y, int(widget.get("w", 158)), int(widget.get("h", 10)),
-                                int(widget.get("len", 6)), int(widget.get("thick", 2)))
+                screen.brackets(x, y, self.geometry(widget, "w", 158),
+                                self.geometry(widget, "h", 10), self.geometry(widget, "len", 6),
+                                self.geometry(widget, "thick", 2))
 
             elif kind == "arrow":
-                screen.arrow(x, y, float(widget.get("r", 8)), self.angle_of(widget))
+                screen.arrow(x, y, self.number(widget, "r", 8), self.angle_of(widget))
 
             elif kind == "turn":
-                screen.turn(x, y, self.angle_of(widget), int(widget.get("size", 11)))
+                screen.turn(x, y, self.angle_of(widget), self.geometry(widget, "size", 11))
 
             elif kind == "vline":
-                screen.rect(x, y, x + 1, y + int(widget.get("h", 10)))
+                screen.rect(x, y, x + 1, y + self.geometry(widget, "h", 10))
+
+    def geometry(self, widget, name, default):
+        """A whole number out of a hand-written widget, or the default.
+
+        Applets are edited by hand, so a wrong type has to be an ordinary mistake rather than a
+        crash: the draw loop runs inside the daemon, and one bad field would end the pad's screen
+        until the file was fixed. `g13-applet check` is what tells the author.
+        """
+        return int(number_or(widget.get(name), default))
+
+    def number(self, widget, name, default):
+        """The same for a value that may be fractional."""
+        return float(number_or(widget.get(name), default))
 
     def angle_of(self, widget):
         """The angle a directional widget points at, read from its source.
@@ -807,11 +905,14 @@ def load_applets(values):
     for path in sorted(directory.glob("*.json")):
         try:
             definition = json.loads(path.read_text())
-        except (OSError, ValueError) as error:
-            print("skipping %s: %s" % (path, error), file=sys.stderr)
+            if not isinstance(definition, dict):
+                raise ValueError("the file is not a JSON object")
+            definition.setdefault("name", path.stem)
+            visual = LayoutVisual(definition, values)
+        except Exception as error:  # a bad applet file must not take the daemon down
+            print("skipping applet %s: %s: %s" % (path, type(error).__name__, error),
+                  file=sys.stderr)
             continue
-        definition.setdefault("name", path.stem)
-        visual = LayoutVisual(definition, values)
         applets[visual.name] = visual
     return applets
 
@@ -1216,7 +1317,12 @@ def config_supersedes(engine, fresh):
 
 def main():
     values = Values()
-    visuals = registry(values)
+    try:
+        visuals = registry(values)
+    except Exception as error:  # a broken applet must not stop the pad from working
+        print("g13-visuals: falling back to the built-in visuals: %s: %s"
+              % (type(error).__name__, error), flush=True)
+        visuals = {visual.name: visual for visual in VISUALS}
     engine = Engine(read_config(), visuals=visuals, values=values)
 
     config_stamp = None
@@ -1294,7 +1400,12 @@ def main():
 
                 if stamp != config_stamp:
                     config_stamp = stamp
-                    fresh_visuals = registry(values)
+                    try:
+                        fresh_visuals = registry(values)
+                    except Exception as error:
+                        print("g13-visuals: keeping the current visuals, reloading failed: %s: %s"
+                              % (type(error).__name__, error), flush=True)
+                        fresh_visuals = engine.visuals
                     fresh = Engine(read_config(), clock=engine.clock,
                                    visuals=fresh_visuals, values=values)
                     # The file is the shared truth, including which visual is showing.
