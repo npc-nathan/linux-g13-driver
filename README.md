@@ -306,11 +306,19 @@ g13-lcd-game-check "~/.steam/steam/steamapps/common/Some Game"
 g13-lcd-game-check --steam          # every installed Steam game
 ```
 
-It distinguishes the three cases that need different answers: the **Logitech LCD SDK** (`LogiLcdInit`,
-what this shim implements — it tells you which build to copy and where), the **older LCD Manager
-API** (`lgLcdInit`, a different set of calls), and a game that opens **the driver's device itself**
-(`LGVirHid`, which cannot be stood in for from outside Windows). Packed executables can hide their
-own names — Dragon Age: Origins does — so "nothing found" means "nothing findable this way".
+It distinguishes the cases that need different answers:
+
+| what it finds | what it means |
+|---|---|
+| the **Logitech LCD SDK** (`LogiLcdInit`) | what this shim implements — it tells you which build to copy and where |
+| the **older LCD Manager API** (`lgLcdInit`) | a different set of calls, needing a second shim |
+| **the driver's device** (`LGVirHid`) | opened directly; cannot be stood in for from outside Windows |
+| **the LCD middleware** (`CLCDManager`, `CEzLcd`) | built to draw on an LCD, but names no Logitech library — the games that do this are driven by Logitech's own software reading them, so a shim has nothing to stand in for. Dragon Age: Origins and The Witcher are both this case |
+| **an LCD helper in the game's own scripts** | the feature exists in the game. On Windows its native half is what an SDK call would drive; a Linux port can have the scripts and not the hardware half (Borderlands 2 on Linux) |
+
+It reads Linux binaries too, so a game with a native port is still judged, and it ignores case,
+because a DLL is named whatever the linker felt like that day. Packed executables can hide their own
+names — Dragon Age: Origins does — so "nothing found" means "nothing findable this way".
 
 While a game owns the screen, `g13-visuals --status` says so (`screen: an SDK client has it`), and
 the pad stops cycling. Deleting that one DLL from the game folder undoes the whole thing.

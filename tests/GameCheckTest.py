@@ -70,6 +70,25 @@ check("the driver's own shim is recognised", True, "already in place" in output)
 check("and it is not counted as the game using the SDK", True, "1 of 0" not in output)
 check("so that folder reports nothing found", True, "nothing found" in output)
 
+# The two verdicts that came out of real games: a BioWare-era game carrying the shared LCD
+# middleware (Dragon Age: Origins, The Witcher), and one whose own scripts have the LCD helper but
+# whose native half is missing (Borderlands 2 on Linux).
+middleware = game("middleware-game", {"game.exe": "RTTI .?AVCLCDManager@@ .?AVCEzLcd@@ .?AVCLCDText@@"})
+code, output = run(middleware)
+check("a game with the LCD middleware is named as such", True, "LCD middleware" in output)
+check("and it is told a shim cannot help", True, "cannot stand in for" in output)
+check("and it exits 0: there is nothing to install", 0, code)
+
+scripts = game("script-game", {"game.exe": "execIsLcdScreenConnected ULcdHelper"})
+code, output = run(scripts)
+check("a game whose scripts have an LCD helper is named as such", True, "LCD helper" in output)
+check("and told which half it is", True, "native half" in output)
+
+# Case must not matter: a DLL is named whatever the linker felt like.
+shouty = game("shouty-game", {"thing.dll": "instance LogitechLCD.DLL and LogiLcdInit"})
+code, output = run(shouty)
+check("a differently-capitalised name is still found", True, "Logitech LCD SDK" in output)
+
 quiet = game("quiet-game", {"game.exe": "an ordinary executable"})
 code, output = run(quiet)
 check("a game with nothing says nothing found", True, "nothing found" in output)

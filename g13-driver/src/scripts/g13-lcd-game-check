@@ -35,8 +35,20 @@ OLD_NAMES = ("lglcd.dll", "lgLcdInit", "lgLcdConnect", "lgLcdUpdateBitmap",
 #: The Logitech driver's device, opened directly by a few games.
 DEVICE_NAMES = ("LGVirHid", "LGDevice")
 
-#: Not every file is worth reading, and a modern game is enormous.
-INTERESTING = (".exe", ".dll")
+#: The LCD middleware that Dragon Age: Origins and The Witcher both compile in. Its presence says
+#: the game was built to draw on an LCD, but not whose API it ends up calling: those two name no
+#: Logitech library at all, which is what the "plugin" model looks like - Logitech's own software
+#: does the talking, and there is nothing of theirs for a shim to stand in for.
+MIDDLEWARE_NAMES = ("CLCDManager", "CEzLcd", "CLCDStreamingText", "EZ_LCD")
+
+#: The other way round: a game whose own scripts carry an LCD helper. Borderlands 2 is this case -
+#: its UnrealScript asks whether an LCD is connected and what to draw on it, while the native half
+#: that would drive one is missing from its Linux port and present in its Windows build.
+SCRIPT_NAMES = ("ULcdHelper", "LcdHelper")
+
+#: Windows libraries and Linux ones: a game with a native Linux port is still worth judging, and
+#: its binaries have no extension at all, so ELF files are found by their magic bytes.
+INTERESTING = (".exe", ".dll", ".so")
 
 #: Beyond this, a file is a runtime or a video rather than a game thinking about an LCD.
 BIG = 200 * 1024 * 1024
@@ -82,31 +94,40 @@ def strings_of(path, wide=False):
 
 
 def what_it_uses(path):
-    """Which of the three ways this file talks to a Logitech LCD, if any.
+    """Which of the ways this file talks to a Logitech LCD, if any.
 
-    This driver's own shim is skipped: it is called LogitechLcd.dll and full of SDK names, so
-    without this a game folder that has already been set up would report that the game uses the
-    SDK - which is exactly the mistake this tool exists to prevent.
+    Case is ignored, because a DLL is named whatever the linker felt like that day
+    (`LogitechLCD.dll` and `LogitechLcd.dll` are the same file to Windows), and this driver's own
+    shim is skipped: it is called LogitechLcd.dll and full of SDK names, so without that a folder
+    that has already been set up would report that the game uses the SDK - the exact mistake this
+    tool exists to prevent.
     """
-    found = {"sdk": set(), "old": set(), "device": set()}
+    found = {"sdk": set(), "old": set(), "device": set(), "middleware": set(), "scripts": set()}
     ours = False
     for wide in (False, True):
-        text = strings_of(path, wide=wide)
+        text = strings_of(path, wide=wide).lower()
         if not text:
             continue
         if "lcd-probe.log" in text:
             ours = True
         for name in SDK_NAMES:
-            if name in text:
+            if name.lower() in text:
                 found["sdk"].add(name)
         for name in OLD_NAMES:
-            if name in text:
+            if name.lower() in text:
                 found["old"].add(name)
         for name in DEVICE_NAMES:
-            if name in text:
+            if name.lower() in text:
                 found["device"].add(name)
+        for name in MIDDLEWARE_NAMES:
+            if name.lower() in text:
+                found["middleware"].add(name)
+        for name in SCRIPT_NAMES:
+            if name.lower() in text:
+                found["scripts"].add(name)
     if ours:
-        return {"sdk": set(), "old": set(), "device": set(), "ours": True}
+        return {"sdk": set(), "old": set(), "device": set(), "middleware": set(),
+                "scripts": set(), "ours": True}
     return found
 
 
@@ -116,18 +137,27 @@ def look_at(folder):
     for root, directories, files in os.walk(folder):
         directories[:] = [d for d in directories if not d.startswith(".")]
         for entry in sorted(files):
-            if not entry.lower().endswith(INTERESTING):
-                continue
             path = os.path.join(root, entry)
             try:
-                if os.path.getsize(path) > BIG:
-                    continue
+                size = os.path.getsize(path)
             except OSError:
+                continue
+            if size > BIG:
+                continue
+            wanted = entry.lower().endswith(INTERESTING)
+            if not wanted:
+                try:
+                    with open(path, "rb") as handle:
+                        wanted = handle.read(4) == b"\x7fELF"
+                except OSError:
+                    continue
+            if not wanted:
                 continue
             found = what_it_uses(path)
             if found.get("ours"):
                 verdicts.append((path, pe_architecture(path), found))
-            elif found["sdk"] or found["old"] or found["device"]:
+            elif (found["sdk"] or found["old"] or found["device"] or found["middleware"]
+                    or found["scripts"]):
                 verdicts.append((path, pe_architecture(path), found))
     return verdicts
 
@@ -151,6 +181,18 @@ def report(label, folder):
         if found.get("ours"):
             print("      this is the driver's own shim, already in place - not the game's doing")
             continue
+        if found.get("scripts") and not (found["sdk"] or found["old"] or found["device"]):
+            print("      the game's own scripts have an LCD helper: %s"
+                  % ", ".join(sorted(found["scripts"])[:3]))
+            print("      -> the feature exists in the game. On Windows its native half is what a")
+            print("         Logitech SDK call would drive; a Linux port can have the scripts and")
+            print("         not the hardware half.")
+        if found.get("middleware") and not (found["sdk"] or found["old"] or found["device"]):
+            print("      an LCD middleware is compiled in: %s"
+                  % ", ".join(sorted(found["middleware"])[:3]))
+            print("      -> built to draw on an LCD, but nothing here names a Logitech library.")
+            print("         Games like this are usually driven by Logitech's own software reading")
+            print("         the game, which a DLL shim cannot stand in for.")
         the_game_says_something = True
         if found["sdk"]:
             outcome = "sdk"
