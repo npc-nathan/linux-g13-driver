@@ -179,6 +179,7 @@ install-user:
 	cp scripts/g13-buttons $(USER_INSTALL_DIR)/g13-buttons
 	cp scripts/g13-applet $(USER_INSTALL_DIR)/g13-applet
 	cp scripts/g13-lcd-game-check $(USER_INSTALL_DIR)/g13-lcd-game-check
+	cp scripts/g13-lcd-sdk-register $(USER_INSTALL_DIR)/g13-lcd-sdk-register
 	cp scripts/g13lcd.py $(USER_INSTALL_DIR)/g13lcd.py
 	chmod +x $(USER_INSTALL_DIR)/g13-keywatch $(USER_INSTALL_DIR)/g13-lcd $(USER_INSTALL_DIR)/g13-watch $(USER_INSTALL_DIR)/g13-buttons $(USER_INSTALL_DIR)/g13-applet $(USER_INSTALL_DIR)/g13-lcd-game-check
 	
@@ -260,7 +261,7 @@ clean: clean-build
 
 # Everything both install targets put in a bin directory.
 INSTALLED_BINS := linux-g13-driver g13-gui $(GUI_JAR_NAME) g13-keywatch g13-lcd g13-watch \
-                  g13-buttons g13-applet g13-lcd-game-check g13lcd.py g13-visuals g13-lcd-bridge g13-service
+                  g13-buttons g13-applet g13-lcd-game-check g13-lcd-sdk-register g13lcd.py g13-visuals g13-lcd-bridge g13-service
 INSTALLED_UNITS := g13.service g13-visuals.service g13-lcd-bridge.service
 
 uninstall-user:

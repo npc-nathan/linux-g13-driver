@@ -283,6 +283,29 @@ In Steam, force a Proton version in the game's Properties → Compatibility. The
 `WINEDLLOVERRIDES="LogitechLcd=n,b"` is not needed when the DLL sits beside the executable, but it
 does no harm if a game is awkward about it.
 
+**How a game finds this DLL at all, which is not obvious.** The Logitech LCD SDK is not found by
+name. Its own loader asks Windows for a class id —
+
+```
+{d0e790a5-01a7-49ae-ae0b-e986bdd0c21b}
+```
+
+— and reads the `ServerBinary` value under it (a 32-bit program under
+`HKEY_CLASSES_ROOT\\Wow6432Node\\CLSID\\{…}\\ServerBinary`). Logitech Gaming Software writes that
+key when it installs; a Wine prefix has no Logitech software in it, so the key is absent and a game
+that uses the SDK finds nothing — with no error, because a failed `LoadLibrary` is silent. That is
+the whole reason a game can support the LCD while containing no trace of Logitech's name.
+
+```bash
+g13-lcd-sdk-register --steam-appid 47810      # one Steam prefix
+g13-lcd-sdk-register --all                    # every Steam and Heroic prefix
+g13-lcd-sdk-register --remove <prefix>
+```
+
+It copies the DLL to `C:\g13\LogitechLcd.dll` inside the prefix, writes the three views of that
+class id into `system.reg` (backing the file up first), and touches nothing else. A game that uses
+the SDK from then on loads **this** DLL — and therefore writes the probe log.
+
 **If nothing appears, the DLL says why.** It writes `lcd-probe.log` beside itself when it is loaded
 and when the game first draws, so the answer is a file rather than a guess:
 

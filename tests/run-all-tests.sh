@@ -79,6 +79,7 @@ run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/
 
 run "the guide agrees with the code" python3 "$TESTS/DocTest.py"
 run "telling a game that wants the SDK from one that does not" python3 "$TESTS/GameCheckTest.py"
+run "registering the shim where Logitech's SDK loader looks" python3 "$TESTS/SdkRegisterTest.py"
 
 echo
 echo "The applet tool"
