@@ -704,6 +704,100 @@ check("applet: an applet edit alone does not move the active visual", True, carr
 
 os.remove(str(edited_file))
 
+# --- http: sources, against a real server on a loopback port ----------------------------------
+# A tiny HTTP server, because the honest way to test a network kind is to talk to one. It records
+# what it was asked for, so a check can prove the token was sent and the path was built right.
+import http.server as http_server
+import threading
+
+_PROBE_ASKED = []
+
+
+class _HttpProbe(http_server.BaseHTTPRequestHandler):
+    """Answers like a home server, and remembers what it was asked."""
+
+    def do_GET(self):
+        _PROBE_ASKED.append((self.path, self.headers.get("Authorization")))
+        if self.path == "/404":
+            self.send_error(404)
+            return
+        if self.path.startswith("/slow"):
+            time.sleep(1.5)
+        body = ("just a line" if self.path.startswith("/text")
+                else json.dumps({"sensor": {"temperature": 21}, "state": "on", "list": ["a", "b"]}))
+        payload = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        try:
+            self.wfile.write(payload)
+        except BrokenPipeError:
+            pass      # the daemon stopped waiting on purpose: that is the timeout check
+
+    def log_message(self, *args):
+        pass
+
+
+# Threaded on purpose: the timeout check above leaves a slow request in flight, and a
+# single-threaded server would make the next check queue behind it and time out as well.
+_probe = http_server.ThreadingHTTPServer(("127.0.0.1", 0), _HttpProbe)
+_probe_port = _probe.server_address[1]
+threading.Thread(target=_probe.serve_forever, daemon=True).start()
+
+_endpoints_file = gv.config_dir() / gv.ENDPOINTS_FILE
+_endpoints_file.parent.mkdir(parents=True, exist_ok=True)
+_endpoints_file.write_text(json.dumps({
+    "home": {"url": "http://127.0.0.1:%d" % _probe_port, "token": "S3CRET"},
+    "slow": {"url": "http://127.0.0.1:%d/slow" % _probe_port, "timeout": 0.3},
+}))
+over_http = gv.Values()
+
+check("http: a nested field out of a JSON answer", 21,
+      over_http.http_field("http:home#sensor.temperature"))
+check("http: a plain field", "on", over_http.http_field("http:home#state"))
+check("http: a list index", "b", over_http.http_field("http:home#list.1"))
+check("http: the whole answer when no field is asked for", "just a line",
+      over_http.http_field("http:home/text"))
+check("http: a whole address, with no endpoint named", "on",
+      over_http.http_field("http://127.0.0.1:%d#state" % _probe_port))
+check("http: an error status reads empty", "", over_http.http_field("http:home/404#state"))
+check("http: a name that is not an endpoint reads empty", "",
+      over_http.http_field("http:nowhere/x#state"))
+check("http: a timeout reads empty", "", over_http.http_field("http:slow#state"))
+check("http: nothing listening reads empty", "",
+      over_http.http_field("http:127.0.0.1:9/x#state"))
+over_http.http_field("http:home/sensor/temperature#sensor.temperature")
+check("http: the path is the endpoint's plus the spec's", True,
+      "/sensor/temperature" in [path for path, _auth in _PROBE_ASKED])
+check("http: the token goes as a bearer", "Bearer S3CRET",
+      next((auth for _path, auth in _PROBE_ASKED if auth), "no token was sent"))
+check("http: the spec an applet holds carries no token", False,
+      "S3CRET" in "http:home/sensor/temperature#sensor.temperature")
+# Through raw()/resolve(), which is the path the daemon draws with - the kind switch is enforced
+# there for every kind, so a check that calls the resolver directly would miss it entirely.
+check("http: switched off in the panel it reads empty", "",
+      gv.Values(disabled=["http"]).raw("http:home#state"))
+check("http: and switched on it reads the value", "on", gv.Values().raw("http:home#state"))
+check("http: a failed address is not asked again straight away", True,
+      bool(over_http._http_retry_at.get("http:slow#state")))
+
+# The whole route, not just the resolver: an applet drawing a value from a web address.
+_over_http_applet = gv.config_dir() / "applets" / "over-http.json"
+_over_http_applet.parent.mkdir(parents=True, exist_ok=True)
+_over_http_applet.write_text(json.dumps({
+    "name": "over-http", "title": "HOME", "interval": 1,
+    "sources": {"temp": "http:home#sensor.temperature"},
+    "widgets": [{"type": "text", "x": 3, "y": 12, "format": "{temp}C"}]}))
+_over_http_screen = gv.Screen()
+gv.LayoutVisual(json.loads(_over_http_applet.read_text()), gv.Values()).render(_over_http_screen, {})
+check("http: an applet draws a value from a web address", True,
+      any(message.startswith("21C") for _x, _y, message in _over_http_screen.texts))
+_over_http_applet.unlink()
+
+_probe.shutdown()
+_endpoints_file.unlink()
+
 # --- who owns the screen and the four buttons (an SDK client, or the visuals) ---
 # The harness pins XDG_CONFIG_HOME to a scratch directory that outlives a run, so start from
 # no file at all rather than from whatever the last run left behind.

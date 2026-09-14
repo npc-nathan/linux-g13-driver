@@ -116,11 +116,29 @@ def source_problems(widget, where, aliases, daemon):
     for name in named:
         if name in aliases or name in daemon.BUILT_IN_SOURCES:
             continue
-        if name.startswith(daemon.SOURCE_PREFIXES):
+        if known_kind(name, daemon):
             continue
-        problems.append("%s: %r is not an alias, not built in, and has no %s prefix"
-                        % (where, name, "/".join(daemon.SOURCE_PREFIXES)))
+        problems.append("%s: %r is not an alias, not built in, and has no kind %s"
+                        % (where, name, "/".join(kind_names(daemon))))
     return problems
+
+
+def kind_names(daemon):
+    """The kinds a spec may start with, for a message a person can act on."""
+    return [name for name, _why in daemon.SOURCE_KINDS if name != "built-in"]
+
+
+def known_kind(spec, daemon):
+    """Whether the daemon would read this spec: a built-in name, or a kind it knows.
+
+    A name with no colon is only read if it is one of the built-in names: source_kind() calls
+    anything without a colon "built-in", and taking that as permission would let a misspelled one
+    (`ammoo`) through, which is the mistake this check exists to catch.
+    """
+    if spec in daemon.BUILT_IN_SOURCES:
+        return True
+    kind = daemon.source_kind(spec)
+    return kind != "built-in" and kind in kind_names(daemon)
 
 
 def structural_problems(definition, daemon):
@@ -143,9 +161,9 @@ def structural_problems(definition, daemon):
     for name, spec in aliases.items():
         if not isinstance(spec, str) or not spec:
             problems.append("source %r has to be a string like 'json:/path#field'" % name)
-        elif not spec.startswith(daemon.SOURCE_PREFIXES) and spec not in daemon.BUILT_IN_SOURCES:
-            problems.append("source %r is %r: not built in, and no %s prefix"
-                            % (name, spec, "/".join(daemon.SOURCE_PREFIXES)))
+        elif not known_kind(spec, daemon):
+            problems.append("source %r is %r: not built in, and no kind %s"
+                            % (name, spec, "/".join(kind_names(daemon))))
 
     if "interval" in definition and not isinstance(definition["interval"], (int, float)):
         problems.append("'interval' has to be a number of seconds")

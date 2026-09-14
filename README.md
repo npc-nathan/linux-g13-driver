@@ -440,8 +440,11 @@ Widgets: `text` (a `format` template, or `source` on its own), `bar` (`source`, 
 Sources: `cpu`, `memory`, `load`, `uptime`, `uptime_seconds`, `time`, `time_seconds`,
 `date`, `day`, `media_status`, `media_artist`, `media_title`, `media_position`,
 `media_duration`, `media_percent`, `profile`, `recording`, `last_key`, `recent_keys`,
-`screen_width`, `screen_height`, plus `env:NAME`, `file:PATH` (first line) and
-`cmd:SHELL COMMAND` (cached 2 s, 0.4 s timeout) for anything else.
+`screen_width`, `screen_height`, plus `env:NAME`, `file:PATH` (first line),
+`json:PATH#FIELD` and `cmd:SHELL COMMAND` (cached 2 s, 0.4 s timeout), and
+`http:<endpoint>/<path>#field` for a web address. An endpoint — its address, headers and token — is
+a named entry in `endpoints.json`, so a shared applet carries `http:weather/now#temp` and no
+credential.
 
 `format` is a `str.format` template over all of the values at once, so one label can show
 several: `"{day} {date} {time}"`. A worked example ships in
@@ -476,7 +479,22 @@ writes the same file, and nothing about it is hidden in the window.
 ### The config tool's sources window
 
 The **Sources…** button opens what data an applet may read, one switch per kind of source:
-`built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:` and `cmd:`.
+`built-in` (cpu, memory, uptime, time, media, profile, keys), `env:`, `file:`, `json:`, `cmd:` and
+`http:`.
+
+The named web addresses `http:` refers to live in `~/.config/g13/endpoints.json`, where an address
+and its credential sit together:
+
+```json
+{
+  "home":    {"url": "http://homeassistant.local:8123",
+              "token": "…", "timeout": 2},
+  "weather": {"url": "https://wttr.in"}
+}
+```
+
+An editor for those, in this window, is the next thing to land here; the file is read as you type
+it, so a change takes effect without restarting anything.
 
 An applet is a JSON file, and it can be passed around, so this is where a capability is granted —
 which is why it is a window and not a config key. Everything starts switched on, so an install
@@ -514,7 +532,14 @@ sides and compares the frames byte for byte - a preview that disagrees with the 
 be worse than no preview at all.
 
 Data sources are named in an applet's JSON: a plain name (`cpu`, `memory`, `time`, ...), or
-`env:NAME`, `file:PATH`, `cmd:COMMAND` and `json:PATH#FIELD` for anything else. `json:`
+`env:NAME`, `file:PATH`, `cmd:COMMAND`, `json:PATH#FIELD` and `http:<endpoint>/<path>#field` for
+anything else. `http:` reads a web address, using the same `#field` convention as `json:`, and the
+endpoint - address, headers, token, timeout - is a named entry in `endpoints.json` rather than
+something written into the applet. Everything that can go wrong (no such endpoint, refused, timed
+out, an error status, a body that is not JSON, a field that is not there) reads as empty, and an
+address that keeps failing is left alone for increasing intervals so an unreachable endpoint cannot
+stutter the screen. A whole `http://host/path#field` address is accepted too, for something public
+that needs no credential. `json:`
 reads one field of a JSON file - dotted for a nested field (`#route.turn`), a number for a
 list index (`#waypoints.0`), and with no `#` a file holding a single number or string is the
 value. A missing file, a missing field, unreadable JSON or a field that is not a scalar all

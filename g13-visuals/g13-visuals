@@ -31,7 +31,10 @@ import math
 import os
 import socket
 import string
+import http.client
+import ssl
 import subprocess
+import urllib.request
 import sys
 import time
 from datetime import datetime
@@ -265,8 +268,6 @@ BUILT_IN_SOURCES = (
 )
 
 #: Sources that read from outside, named by where they read from rather than by what is there.
-SOURCE_PREFIXES = ("env:", "file:", "cmd:", "json:")
-
 #: The kinds of source an applet may read from, and what each one lets somebody else's applet do.
 #: All of them are on until switched off: a disabled kind reads as empty, exactly like a file that
 #: is not there, so the screen keeps drawing and `g13-applet check` is what tells the author why.
@@ -276,9 +277,19 @@ SOURCE_KINDS = (
     ("file", "the first line of any file, e.g. file:/proc/loadavg"),
     ("json", "named fields out of a JSON file, e.g. json:/path/to/hud.json#health"),
     ("cmd", "shell commands, e.g. cmd:date +%H:%M"),
+    ("http", "web addresses, e.g. http:weather/now#temp; the address and any token are named "
+             "in endpoints.json, never in the applet"),
 )
 
 SOURCES_FILE = "sources.json"
+ENDPOINTS_FILE = "endpoints.json"
+
+#: How long to wait for a web address before giving up on it. Short on purpose: the daemon draws
+#: the screen on one thread, so a slow endpoint is a slow pad.
+HTTP_TIMEOUT = 0.5
+
+#: The most of a response to read, so an endpoint that streams something huge cannot fill memory.
+HTTP_LIMIT = 65536
 
 
 def source_kind(spec):
@@ -562,6 +573,47 @@ APPLET_PREFIX = "applet:"
 # --- data a designed applet can show ---
 
 
+def field_of(data, field):
+    """One field out of parsed JSON: dotted for nesting, a number for a list index.
+
+    Shared by `json:` (a file something else writes) and `http:` (a web address), so a field path
+    means the same thing whichever way the data arrived - `#hud.ammo`, `#route.0`, `#state`.
+    """
+    for part in field.split("."):
+        if isinstance(data, dict) and part in data:
+            data = data[part]
+        elif isinstance(data, list) and part.lstrip("-").isdigit():
+            index = int(part)
+            data = data[index] if -len(data) <= index < len(data) else ""
+        else:
+            return ""
+    return data if isinstance(data, (int, float, str, bool)) else ""
+
+
+def split_http(spec):
+    """`http:<endpoint>/<path>#<field>`, or a whole `http://host/path#<field>` address.
+
+    Returns the endpoint name (or host), the path, and the field. The endpoint is a name from
+    endpoints.json, where its address and any credential live; a whole address is allowed too, for
+    something public that needs no credential.
+    """
+    rest = spec[len("http:"):]
+    if rest.startswith("//"):
+        rest = "http:" + rest              # somebody wrote http://host/...
+    if rest.startswith("http://") or rest.startswith("https://"):
+        address, separator, field = rest.rpartition("#")
+        if not separator:
+            address, field = rest, ""
+        scheme, _, host_and_path = address.partition("://")
+        host, slash, tail = host_and_path.partition("/")
+        return scheme + "://" + host, (tail if slash else ""), field
+    address, separator, field = rest.rpartition("#")
+    if not separator:
+        address, field = rest, ""
+    endpoint, slash, tail = address.partition("/")
+    return endpoint, (tail if slash else ""), field
+
+
 def shell(command, timeout=0.4):
     """Runs a command for its output, or None if it fails or takes too long."""
     try:
@@ -597,6 +649,12 @@ class Values:
         self._fixed_disabled = list(disabled) if disabled is not None else None
         self._disabled = []
         self._disabled_at = None
+        #: Named endpoints, their stamp, and how often each address has failed (so an unreachable
+        #: one is left alone for a while rather than stuttering the screen on every redraw).
+        self._endpoints = {}
+        self._endpoints_stamp = None
+        self._http_failures = {}
+        self._http_retry_at = {}
 
     def blocked_kinds(self):
         """The kinds of source this applet may not read, read from the config every few seconds."""
@@ -725,6 +783,9 @@ class Values:
         if source.startswith("cmd:"):
             return shell(source[4:]) or ""
 
+        if source.startswith("http:"):
+            return self.http_field(source)
+
         return ""
 
     def json_field(self, spec):
@@ -750,16 +811,86 @@ class Values:
         if not field:
             return data if isinstance(data, (int, float, str, bool)) else ""
 
-        for part in field.split("."):
-            if isinstance(data, dict) and part in data:
-                data = data[part]
-            elif isinstance(data, list) and part.lstrip("-").isdigit():
-                index = int(part)
-                data = data[index] if -len(data) <= index < len(data) else ""
-            else:
-                return ""
+        return field_of(data, field)
 
-        return data if isinstance(data, (int, float, str, bool)) else ""
+    def endpoints(self):
+        """The named web addresses, re-read from endpoints.json when it changes.
+
+        This is where an address and its credential live, so an applet that gets shared carries a
+        name like `http:weather/now#temp` and no key at all.
+        """
+        path = config_dir() / ENDPOINTS_FILE
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            self._endpoints, self._endpoints_stamp = {}, None
+            return self._endpoints
+        if stamp != self._endpoints_stamp:
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, ValueError):
+                data = {}
+            self._endpoints = data if isinstance(data, dict) else {}
+            self._endpoints_stamp = stamp
+        return self._endpoints
+
+    def http_field(self, spec):
+        """One value from a web address: `http:<endpoint>/<path>#<field>`.
+
+        Everything that can go wrong - no such endpoint, refused, timed out, an error status, a
+        body that is not JSON, a field that is not there - reads as empty, exactly like a game that
+        is not running. A name that is not in endpoints.json is empty too rather than an error: the
+        applet says what it wanted, and `g13-applet check --values` is where a person finds out why.
+        """
+        now = self.clock()
+        if now < self._http_retry_at.get(spec, 0):
+            return ""
+
+        endpoint, tail, field = split_http(spec)
+        named = self.endpoints().get(endpoint)
+        if isinstance(named, dict):
+            base = str(named.get("url", ""))
+            headers = dict(named.get("headers") or {})
+            if named.get("token"):
+                # The usual shape for a home server: a bearer token on every request.
+                headers.setdefault("Authorization", "Bearer %s" % named["token"])
+            timeout = float(named.get("timeout", HTTP_TIMEOUT))
+            insecure = bool(named.get("insecure"))
+        elif "://" in endpoint or endpoint.startswith("//") or "." in endpoint:
+            base = endpoint if "://" in endpoint else "http:" + endpoint
+            headers, timeout, insecure = {}, HTTP_TIMEOUT, False
+        else:
+            return self.http_gave_up(spec, now)
+
+        url = base.rstrip("/") + ("/" + tail if tail else "")
+        try:
+            context = None
+            if insecure:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                body = response.read(HTTP_LIMIT).decode("utf-8", "replace")
+        except (OSError, ValueError, http.client.HTTPException):
+            return self.http_gave_up(spec, now)
+
+        self._http_failures.pop(spec, None)
+        self._http_retry_at.pop(spec, None)
+
+        if not field:
+            return body.strip().splitlines()[0] if body.strip() else ""
+        try:
+            return field_of(json.loads(body), field)
+        except ValueError:
+            return ""
+
+    def http_gave_up(self, spec, now):
+        """Remembers that an address failed, and backs off so it cannot stutter the screen."""
+        failures = self._http_failures.get(spec, 0) + 1
+        self._http_failures[spec] = failures
+        self._http_retry_at[spec] = now + min(60.0, 2.0 ** failures)
+        return ""
 
     def all(self, sources):
         """Resolves several sources at once, for the values file."""
@@ -1652,7 +1783,8 @@ def config_stamp_now():
     change at all, which is exactly how a designer save went unnoticed.
     """
     stamps = []
-    watched = [config_dir() / "visuals.json", config_dir() / SOURCES_FILE]
+    watched = [config_dir() / "visuals.json", config_dir() / SOURCES_FILE,
+               config_dir() / ENDPOINTS_FILE]
     try:
         watched += sorted(applet_dir().glob("*.json"))
     except OSError:

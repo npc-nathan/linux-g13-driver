@@ -48,6 +48,8 @@ public class Sources {
         new Kind("file", "the first line of any file, e.g. file:/proc/loadavg"),
         new Kind("json", "named fields out of a JSON file, e.g. json:/path/to/hud.json#health"),
         new Kind("cmd", "shell commands, e.g. cmd:date +%H:%M"),
+        new Kind("http", "web addresses, e.g. http:weather/now#temp; the address and any token "
+                + "are named in endpoints.json, never in the applet"),
     };
 
     /** The file the daemon reads. */
