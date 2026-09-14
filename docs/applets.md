@@ -29,6 +29,7 @@ with any text editor. Both ways are first-class.
   16. [A value is blank — find out why](#16-a-value-is-blank--find-out-why)
   17. [Show something a program can only print](#17-show-something-a-program-can-only-print)
   18. [Show what an MQTT topic says](#18-show-what-an-mqtt-topic-says)
+  19. [Show what a web socket says](#19-show-what-a-web-socket-says)
 - Part 2 — Reference
   - [The applet file](#the-applet-file)
   - [The variables](#the-variables)
@@ -554,6 +555,41 @@ subscribe lazily, so only topics something actually uses are subscribed to. Noth
 for the broker — a broker that is down leaves the value blank and the screen keeps drawing, which is
 also why the pad never stutters because a sensor went away.
 
+## 19. Show what a web socket says
+
+Some things have no HTTP endpoint and no broker: they open a web socket and push. That is the only
+way to reach obs-websocket, Home Assistant's event stream, or most live feeds.
+
+1. Put the address in `~/.config/g13/endpoints.json`. Two optional fields do the work a web socket
+   protocol would otherwise do for you: `subscribe` is sent as soon as the socket opens, and `ping`
+   every few seconds if the server expects to hear from you.
+
+   ```json
+   {
+     "obs": {
+       "url": "ws://127.0.0.1:4455",
+       "subscribe": "{\"op\": 1, \"d\": {\"rpcVersion\": 1, \"authentication\": \"…\"}}",
+       "ping": ""
+     }
+   }
+   ```
+
+   `wss://` is the same over TLS. Anything secret belongs here, never in an applet.
+
+2. Read a field of the last message; with no `#field` you get the whole message:
+
+   ```bash
+   $ g13-visuals --read 'ws:obs#d.settings.fps'
+     ws:obs#d.settings.fps
+     -> 60
+   ```
+
+3. In an applet: `fps = ws:obs#d.settings.fps`, then `format: "{fps} fps"`.
+
+Like MQTT, the socket is opened when an applet first asks for it and the last message is kept, so a
+value appears a fraction of a second after it arrives, and a server that is down leaves the value
+blank instead of holding up the screen.
+
 # Part 2 — Reference
 
 ## The applet file
@@ -618,6 +654,7 @@ the **Kinds** tab switches.
 | `http:` | a value from a web address | `http:ha/api/states/sensor.x#state` | 2 s, 0.5 s to fetch |
 | `regex:` | the last match of a pattern in a text file | `regex:/tmp/game.log#hp=(\d+)` | 0.2 s |
 | `mqtt:` | the last message on a topic | `mqtt:home/sensors/kitchen#state` | instant (pushed) |
+| `ws:` | the last message from a web socket | `ws:obs#d.settings` | instant (pushed) |
 
 `json:` and `http:` walk into their data with `#field`: `#hud.ammo` for a nested object, `#route.0`
 for the first item of a list. Anything missing or unreadable reads as **empty** — never an error on

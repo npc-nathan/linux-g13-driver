@@ -53,6 +53,9 @@ public class Sources {
         new Kind("regex", "a pattern out of a text file, e.g. regex:/tmp/game.log#health=(\\d+)"),
         new Kind("mqtt", "the last message on a topic, e.g. mqtt:home/sensors/kitchen#state; the broker "
                 + "and any credential are named in endpoints.json, never in the applet"),
+        new Kind("ws", "the last message from a web socket, e.g. ws:obs#d.settings; the address, "
+                + "anything to send on connect and any credential are named in endpoints.json, "
+                + "never in the applet"),
     };
 
     /** The file the daemon reads. */
