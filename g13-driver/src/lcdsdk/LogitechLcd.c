@@ -70,6 +70,57 @@ typedef int g13_fd;
 #define g13_recv(fd, buffer, length) ((long)read((fd), (buffer), (length)))
 #endif
 
+#if defined(G13_WINDOWS)
+/* ---------------------------------------------------------------- the probe
+ *
+ * A note of what happened, written beside this DLL, so that "did the game load us, and what did
+ * it ask for" is answerable from outside Wine rather than by guessing at a packed executable's
+ * strings. If the file cannot be written it does nothing at all: a probe must never get in the
+ * way of the screen, and this one is only ever read by a person running the game.
+ */
+static void probe_log(const char *what)
+{
+    char path[MAX_PATH];
+    DWORD length = GetModuleFileNameA((HMODULE)(void *)&probe_log, path, sizeof path);
+    FILE *log;
+    DWORD at;
+
+    if (length == 0 || length >= sizeof path) {
+        return;
+    }
+    for (at = length; at > 0; at--) {
+        if (path[at - 1] == '\\' || path[at - 1] == '/') {
+            path[at - 1] = '\0';
+            break;
+        }
+    }
+    snprintf(path + strlen(path), sizeof path - strlen(path), "\\lcd-probe.log");
+    log = fopen(path, "a");
+    if (!log) {
+        return;
+    }
+    fprintf(log, "%s\n", what);
+    fclose(log);
+}
+
+/* Whether the game loads this DLL at all is the first question, so answer it before anybody
+ * calls in. The pointer width says which build a game picked up, which is the second question:
+ * a 64-bit DLL in a 32-bit game loads and does nothing. */
+static void __attribute__((constructor)) probe_loaded(void)
+{
+    char note[96];
+    snprintf(note, sizeof note - 1, "loaded LogitechLcd.dll (%u-bit)",
+             (unsigned)(sizeof(void *) * 8));
+    probe_log(note);
+}
+#else
+static void probe_log(const char *what)
+{
+    (void)what;      /* the native build has a terminal to complain on */
+}
+#endif
+
+
 static void set_nonblocking(g13_fd fd)
 {
 #if defined(G13_WINDOWS)
@@ -206,8 +257,11 @@ static g13_fd open_screen(void)
 
     fd = socket(found->ai_family, found->ai_socktype, found->ai_protocol);
     if (fd != G13_INVALID && connect(fd, found->ai_addr, (int)found->ai_addrlen) != 0) {
+        char note[128];
         close_fd(fd);
         fd = G13_INVALID;
+        snprintf(note, sizeof note - 1, "cannot reach g13-lcd-bridge on %s:%s", host, port);
+        probe_log(note);
     }
     if (fd != G13_INVALID) {
         set_nonblocking(fd);
@@ -332,6 +386,16 @@ static void wchar_to_ascii(const uint16_t *text, char *out, size_t out_size)
 
 bool LogiLcdInit(const uint16_t *friendlyName, unsigned lcdType)
 {
+    char asked[64];
+    char note[160];
+
+    asked[0] = '\0';
+    if (friendlyName) {
+        wchar_to_ascii(friendlyName, asked, sizeof asked);
+    }
+    snprintf(note, sizeof note - 1, "LogiLcdInit(name=\"%s\", type=%u)", asked, lcdType);
+    probe_log(note);
+
     char name[128];
 
     (void)lcdType;   /* MONO and EITHER both end up on this panel; COLOR cannot. */
@@ -404,6 +468,15 @@ bool LogiLcdMonoSetBackground(const uint8_t *monoBitmap)
 
 void LogiLcdUpdate(void)
 {
+    /* The first frame is the one that matters: it says the game got as far as drawing. */
+    static int reported = 0;
+    if (reported++ == 0) {
+        char note[256];
+        snprintf(note, sizeof note - 1, "LogiLcdUpdate: first frame, line 0 = \"%.60s\"",
+                 line_set[0] ? lines[0] : "(nothing)");
+        probe_log(note);
+    }
+
     static const char hex[] = "0123456789abcdef";
     char frame[8 + FRAME_BYTES * 2 + 2];
     char output[4096];

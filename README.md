@@ -258,6 +258,49 @@ from flickering.
 Limits, stated rather than discovered later: two programs calling `LogiLcdUpdate()` will fight
 over the screen (Logitech's LCD Manager rotated between applets; there is no manager here).
 
+### A Windows game under Wine or Proton
+
+The same SDK, as a Windows DLL, so a game with native Logitech LCD support can drive the pad under
+Proton. Two builds, because the game decides which it can load — a 2009 title like Dragon Age:
+Origins is 32-bit and cannot load a 64-bit library:
+
+```bash
+make -C g13-driver/src/lcdsdk windows
+# LogitechLcd.dll      32-bit, the name an LCD-era game asks for
+# LogitechLcd.x64.dll  64-bit, for a modern one
+```
+
+Copy the matching one into the folder holding the game's executable, **as `LogitechLcd.dll`** (that
+is the name every game loads), and make sure `g13-lcd-bridge` is running — the DLL talks to it over
+`127.0.0.1:51513`, which Wine shares with the host:
+
+```bash
+cp LogitechLcd.dll "~/.steam/steam/steamapps/common/<game>/path/to/exe/"
+systemctl --user status g13-lcd-bridge
+```
+
+In Steam, force a Proton version in the game's Properties → Compatibility. The launch option
+`WINEDLLOVERRIDES="LogitechLcd=n,b"` is not needed when the DLL sits beside the executable, but it
+does no harm if a game is awkward about it.
+
+**If nothing appears, the DLL says why.** It writes `lcd-probe.log` beside itself when it is loaded
+and when the game first draws, so the answer is a file rather than a guess:
+
+```bash
+cat "…/path/to/exe/lcd-probe.log"
+```
+
+| line | what it means |
+|---|---|
+| `loaded LogitechLcd.dll (32-bit)` | the game loaded it: it does look for this SDK |
+| `LogiLcdInit(name="…", type=…)` | the game initialised it, and that is the name it calls itself |
+| `LogiLcdUpdate: first frame, line 0 = "…"` | it drew something, so the pad should be showing it |
+| `cannot reach g13-lcd-bridge on 127.0.0.1:51513` | the bridge is not running, or `G13_LCD_TCP` points somewhere else |
+| the file does not exist at all | the game never loaded it — it wants another name or another SDK |
+
+While a game owns the screen, `g13-visuals --status` says so (`screen: an SDK client has it`), and
+the pad stops cycling. Deleting that one DLL from the game folder undoes the whole thing.
+
 ### Games under Wine or Proton
 
 A Windows program cannot use the driver's Unix sockets, so the Windows build of the library

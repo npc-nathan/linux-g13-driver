@@ -30,14 +30,24 @@ lcdsdk-selftest: lcdsdk-selftest.c LogitechLcd.c LogitechLcd.h
 lcdsdk-selftest-tcp: lcdsdk-selftest.c LogitechLcd.c LogitechLcd.h
 	$(CC) $(CFLAGS) -DG13_TCP_TRANSPORT=1 -o $@ lcdsdk-selftest.c LogitechLcd.c
 
+# Both architectures, because the game decides: Dragon Age: Origins (2009) is 32-bit and can only
+# load a 32-bit DLL, while anything modern is 64-bit. The name a game loads is LogitechLcd.dll
+# either way, so the 32-bit build takes that name - it is what the LCD-era games ask for - and the
+# 64-bit one is built beside it, to be renamed on the way into a modern game's folder.
+WINDOWS_FLAGS := -O2 -Wall -Wextra -shared
+
 windows: LogitechLcd.c LogitechLcd.h LogitechLcd.def
-	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || { \
+	@command -v i686-w64-mingw32-gcc >/dev/null 2>&1 || { \
 	  echo "mingw-w64 is not installed (apt install mingw-w64); skipping the Windows proxy."; \
 	  exit 0; }
-	x86_64-w64-mingw32-gcc -O2 -Wall -Wextra -shared -o LogitechLcd.dll \
+	i686-w64-mingw32-gcc $(WINDOWS_FLAGS) -o LogitechLcd.dll \
 	  LogitechLcd.c -Wl,LogitechLcd.def -lws2_32
-	@echo "built LogitechLcd.dll: drop it in the game's prefix and set a DLL override,"
-	@echo "and run g13-lcd-bridge so it has something to talk to"
+	@command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 && \
+	  x86_64-w64-mingw32-gcc $(WINDOWS_FLAGS) -o LogitechLcd.x64.dll \
+	    LogitechLcd.c -Wl,LogitechLcd.def -lws2_32 || true
+	@echo "built LogitechLcd.dll (32-bit) and LogitechLcd.x64.dll (64-bit)."
+	@echo "Copy the one matching the game into its folder as LogitechLcd.dll, keep"
+	@echo "g13-lcd-bridge running, and read lcd-probe.log beside it if nothing appears."
 
 install: all
 	mkdir -p $(PREFIX)/lib $(PREFIX)/include $(PREFIX)/bin
@@ -47,6 +57,6 @@ install: all
 	chmod +x $(PREFIX)/bin/g13-lcd-bridge
 
 clean:
-	rm -f liblogitechlcd.so liblogitechlcd-tcp.so lcdsdk-selftest lcdsdk-selftest-tcp LogitechLcd.dll
+	rm -f liblogitechlcd.so liblogitechlcd-tcp.so lcdsdk-selftest lcdsdk-selftest-tcp LogitechLcd.dll LogitechLcd.x64.dll
 
 .PHONY: all install windows clean

@@ -129,24 +129,46 @@ def watch_client_file(path, seen):
 
 
 def check_windows_proxy():
-    """The Windows artifact itself: a 64-bit PE DLL exporting exactly the SDK's functions."""
-    dll = os.path.join(LCDSDK, "LogitechLcd.dll")
-    if not os.path.exists(dll):
+    """The Windows artifacts: a 32-bit and a 64-bit PE DLL exporting exactly the SDK's functions.
+
+    The 32-bit one carries the name a game loads, because that is what the LCD-era games need: a
+    2009 title like Dragon Age: Origins is 32-bit and cannot load a 64-bit library at all. The
+    64-bit one is built beside it, to be renamed on the way into a modern game's folder.
+    """
+    exports = ("LogiLcdInit", "LogiLcdIsConnected", "LogiLcdIsButtonPressed", "LogiLcdUpdate",
+               "LogiLcdShutdown", "LogiLcdMonoSetBackground", "LogiLcdMonoSetText",
+               "LogiLcdColorSetBackground", "LogiLcdColorSetTitle", "LogiLcdColorSetText")
+
+    def dump_of(program, path):
+        return subprocess.run([program, "-p", path], capture_output=True, text=True).stdout
+
+    thirty_two = os.path.join(LCDSDK, "LogitechLcd.dll")
+    if not os.path.exists(thirty_two):
         print("%-56s %-22s %s" % ("the Windows proxy exists", "-> not built",
                                   "warning (make -C lcdsdk windows)"))
         return
 
-    dump = subprocess.run(["x86_64-w64-mingw32-objdump", "-p", dll], capture_output=True,
-                          text=True).stdout
-    check("the proxy is a 64-bit Windows DLL", True, "pei-x86-64" in dump)
-    for name in ("LogiLcdInit", "LogiLcdIsConnected", "LogiLcdIsButtonPressed", "LogiLcdUpdate",
-                 "LogiLcdShutdown", "LogiLcdMonoSetBackground", "LogiLcdMonoSetText",
-                 "LogiLcdColorSetBackground", "LogiLcdColorSetTitle", "LogiLcdColorSetText"):
-        check("the proxy exports %s" % name, True, name in dump)
-    check("the proxy needs only the usual Windows libraries", True,
+    dump = dump_of("i686-w64-mingw32-objdump", thirty_two)
+    check("the DLL a game loads is 32-bit", True, "pei-i386" in dump)
+    for name in exports:
+        check("it exports %s" % name, True, name in dump)
+    check("it needs only the usual Windows libraries", True,
           all(library in dump for library in ("KERNEL32.dll", "WS2_32.dll", "msvcrt.dll")))
-    check("the proxy is the size a small shim should be", True,
-          os.path.getsize(dll) < 2 * 1024 * 1024)
+    check("it is the size a small shim should be", True,
+          os.path.getsize(thirty_two) < 2 * 1024 * 1024)
+    # The probe is what makes a game that says nothing diagnosable, so its two strings have to be
+    # in the artifact rather than merely in the source.
+    notes = subprocess.run(["strings", "-a", thirty_two], capture_output=True, text=True).stdout
+    check("it carries the probe that records what a game asked", True,
+          "lcd-probe.log" in notes and "LogiLcdInit(name=" in notes)
+
+    sixty_four = os.path.join(LCDSDK, "LogitechLcd.x64.dll")
+    if os.path.exists(sixty_four):
+        dump64 = dump_of("x86_64-w64-mingw32-objdump", sixty_four)
+        check("the second build is 64-bit", True, "pei-x86-64" in dump64)
+        check("it exports the same SDK", True, all(name in dump64 for name in exports))
+    else:
+        check("the 64-bit build was made alongside it", "a file", "missing")
 
 
 def main():
