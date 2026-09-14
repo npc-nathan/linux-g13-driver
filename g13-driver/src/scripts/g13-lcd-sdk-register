@@ -1,173 +1,303 @@
 #!/usr/bin/env python3
-"""Point a Wine/Proton prefix at this driver's LogitechLcd.dll, the way Logitech's SDK is found.
+"""Point a game's Wine prefix at this driver's LogitechLcd.dll, the way Logitech's SDK is found.
 
-The Logitech LCD SDK is not found by name. Its own loader asks Windows for the class id
+The Logitech LCD SDK is not found by name. Its loader asks Windows for a class id --
 
     {d0e790a5-01a7-49ae-ae0b-e986bdd0c21b}
 
-and reads the "ServerBinary" value under that CLSID - a 32-bit program under
-`HKEY_CLASSES_ROOT\\Wow6432Node\\CLSID\\{...}\\ServerBinary`, a 64-bit one without the Wow6432Node
-step. That is why a game can use the SDK with no trace of its name in any string, and why a game in
-a Wine prefix finds nothing at all: no Logitech software was ever installed there to write the key.
+-- and reads the `ServerBinary` value under it (a 32-bit program under the Wow6432Node view).
+Logitech Gaming Software writes that key when it installs; a Wine prefix has no Logitech software
+in it, so the key is absent, and a game that uses the SDK finds nothing at all. That failure is
+silent, which is why a game can support the LCD, contain no trace of Logitech's name in any string,
+and still never appear to try.
 
-This writes it, pointing at a copy of our DLL inside the prefix, so a game that uses the SDK loads
-the shim instead - and the shim's probe log then says what the game asked for.
+So this copies the 32-bit DLL to `C:\g13\LogitechLcd.dll` inside the prefix (a fixed place
+that does not depend on the game's folder or a drive letter) and teaches the prefix where it is.
 
-    g13-lcd-sdk-register <prefix>            one prefix
-    g13-lcd-sdk-register --steam-appid 47810
-    g13-lcd-sdk-register --all               every prefix found under Steam and Heroic
-    g13-lcd-sdk-register --remove <prefix>
+Three rules, each learned the hard way:
 
-Nothing else in the prefix is touched, and the file it edits is backed up beside itself first.
+1. **Registry writes go through `wine reg add`, never by editing system.reg.** Wine keeps the
+   registry in memory and writes the whole file back when the last process exits, so a key added
+   to that file behind Wine's back is silently discarded -- which is what a first version of this
+   did, and why a game tested with it showed nothing.
+2. **Use the game's own Wine.** A Steam game runs under the Proton Steam selected for it; a Heroic
+   game runs under the Proton Heroic downloaded (often Proton-CachyOS), which is *not* Steam's.
+   Writing a prefix with a different Wine than the one that runs it is how a prefix gets altered
+   behind the game's back. This resolves the right one per prefix, or takes `--wine`.
+3. **Say which Wine was used, every time.** No silent guessing.
+
+    g13-lcd-sdk-register <prefix>              one prefix
+    g13-lcd-sdk-register --steam-appid 47810   one Steam game (compatdata/<appid>)
+    g13-lcd-sdk-register --all                 every Steam and Heroic prefix found
+    g13-lcd-sdk-register --status              which prefixes are set up (no Wine, instant)
+    g13-lcd-sdk-register --verify <prefix>     read the key back the way a game would
+    g13-lcd-sdk-register --remove <prefix>     take it back out
+    g13-lcd-sdk-register --wine /path/to/wine <prefix>   force a particular Wine
 """
 import glob
 import os
 import re
 import shutil
+import subprocess
 import sys
-import time
 
 CLSID = "{d0e790a5-01a7-49ae-ae0b-e986bdd0c21b}"
-#: Where the DLL goes inside the prefix: a path the game can reach whatever its own drive letters
-#: turn out to be, and one this script owns rather than a game folder Steam may verify.
-INSIDE = "C:\\g13\\LogitechLcd.dll"
-INSIDE_DIR = "drive_c/g13"
+INSIDE = "C:\\g13\\LogitechLcd.dll"          # where the DLL goes inside the prefix
+VIEWS = [
+    "HKLM\\Software\\Classes\\CLSID\\%s\\ServerBinary" % CLSID,
+    "HKLM\\Software\\Classes\\Wow6432Node\\CLSID\\%s\\ServerBinary" % CLSID,
+    "HKLM\\Software\\Wow6432Node\\Classes\\CLSID\\%s\\ServerBinary" % CLSID,
+]
+LIVE = VIEWS[1]                               # the one a 32-bit program actually reads
+STEAM_HOMES = ("~/.steam/steam", "~/.steam/debian-installation", "~/.local/share/Steam")
+HEROIC_TOOLS = "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/tools/proton"
+HEROIC_GAMES = "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/GamesConfig"
+FORCED_WINE = None
 
-#: Both views of the class id: Wine merges HKEY_CLASSES_ROOT from Software\\Classes, and separates
-#: 32-bit keys under Wow6432Node, so all three are written and any of them can be the one read.
-KEYS = (
-    "Software\\\\Classes\\\\CLSID\\\\" + CLSID + "\\\\ServerBinary",
-    "Software\\\\Classes\\\\Wow6432Node\\\\CLSID\\\\" + CLSID + "\\\\ServerBinary",
-    "Software\\\\Wow6432Node\\\\Classes\\\\CLSID\\\\" + CLSID + "\\\\ServerBinary",
-)
+
+def wine_bits(binary):
+    """The two things a Wine binary needs from its own tree: LD_LIBRARY_PATH and the binary."""
+    top = os.path.dirname(os.path.dirname(binary))
+    return [binary], {"LD_LIBRARY_PATH": "%s/lib64:%s/lib" % (top, top)}
 
 
-def prefixes():
-    """Every Wine prefix this machine is likely to have, from Steam and Heroic."""
+def installed_protons():
     found = []
-    patterns = [
-        "~/.steam/debian-installation/steamapps/compatdata/*/pfx",
-        "~/.steam/steam/steamapps/compatdata/*/pfx",
-        "~/.local/share/Steam/steamapps/compatdata/*/pfx",
-        "~/Games/Heroic/Prefixes/*",
-        "~/.var/app/com.heroicgameslauncher.hgl/Games/Heroic/Prefixes/*",
-    ]
-    for pattern in patterns:
-        for path in glob.glob(os.path.expanduser(pattern)):
-            if os.path.isdir(os.path.join(path, "drive_c")):
-                found.append(path)
-    return sorted(set(found))
+    for home in STEAM_HOMES:
+        for directory in sorted(glob.glob(os.path.expanduser(home) + "/steamapps/common/Proton*")):
+            binary = os.path.join(directory, "files", "bin", "wine")
+            if os.path.exists(binary):
+                found.append((os.path.basename(directory), binary))
+    return found
+
+
+def heroic_protons():
+    found = []
+    for directory in sorted(glob.glob(os.path.expanduser(HEROIC_TOOLS) + "/*")):
+        binary = os.path.join(directory, "files", "bin", "wine")
+        if os.path.exists(binary):
+            found.append((os.path.basename(directory), binary))
+    return found
+
+
+def steam_appid_of(prefix):
+    match = re.search(r"/compatdata/(\d+)/", prefix + "/")
+    return match.group(1) if match else None
+
+
+def steam_chosen_proton(appid):
+    """Steam records the tool it will use for an app; the default is the newest installed."""
+    for home in STEAM_HOMES:
+        for name in ("config/config.vdf", "config/localconfig.vdf", "userdata/*/config/localconfig.vdf"):
+            for path in glob.glob(os.path.expanduser(home) + "/" + name):
+                try:
+                    text = open(path, encoding="utf-8", errors="ignore").read()
+                except OSError:
+                    continue
+                match = re.search(r'"%s"\s*\{(.{0,300}?)\}' % appid, text, re.S)
+                if match and '"name"' in match.group(1):
+                    wanted = re.search(r'"name"\s*"([^"]+)"', match.group(1)).group(1)
+                    for installed, binary in installed_protons():
+                        if wanted.lower().replace("proton_", "").replace(".", "") in \
+                                installed.lower().replace(" ", "").replace(".", ""):
+                            return installed, binary, "Steam's choice for %s (%s)" % (appid, wanted)
+                    return None, None, "Steam chose '%s' for %s, which is not installed here" % (wanted, appid)
+    protons = installed_protons()
+    if len(protons) == 1:
+        return protons[0][0], protons[0][1], "the only Proton installed"
+    if protons:
+        return protons[-1][0], protons[-1][1], "newest of %d Protons installed" % len(protons)
+    return None, None, "no Steam Proton installed"
+
+
+def wine_for(prefix):
+    """(binary, env, a sentence naming it) for the Wine that actually runs this prefix."""
+    if FORCED_WINE:
+        binaries, env = wine_bits(FORCED_WINE)
+        return binaries, env, "--wine %s" % FORCED_WINE
+
+    heroic = os.path.expanduser("~/Games/Heroic/Prefixes")
+    if os.path.abspath(prefix).startswith(heroic + os.sep):
+        protons = heroic_protons()
+        if len(protons) == 1:
+            binaries, env = wine_bits(protons[0][1])
+            return binaries, env, "Heroic's own Proton (%s)" % protons[0][0]
+        if protons:
+            binaries, env = wine_bits(protons[-1][1])
+            return binaries, env, "Heroic's newest Proton (%s of %d)" % (protons[-1][0], len(protons))
+        return None, None, "Heroic's Proton folder is empty"
+
+    appid = steam_appid_of(prefix)
+    if appid:
+        name, binary, reason = steam_chosen_proton(appid)
+        if not binary:
+            return None, None, reason
+        binaries, env = wine_bits(binary)
+        return binaries, env, "Steam's Proton (%s, %s)" % (name, reason)
+
+    found = shutil.which("wine")
+    if found:
+        return [found], {}, "system wine"
+    found = shutil.which("wine64")
+    if found:
+        return [found], {}, "system wine64"
+    return None, None, "no Wine found for this prefix"
+
+
+def wine_run(command, prefix):
+    binaries, env_extra, description = wine_for(prefix)
+    if not binaries:
+        return 127, description
+    environment = dict(os.environ)
+    environment.update(env_extra)
+    environment["WINEPREFIX"] = prefix
+    environment.setdefault("WINEDEBUG", "-all")
+    try:
+        finished = subprocess.run(binaries + command, capture_output=True, text=True,
+                                  env=environment, timeout=240)
+    except (OSError, subprocess.TimeoutExpired) as problem:
+        return 126, str(problem)
+    return finished.returncode, (finished.stdout or "") + (finished.stderr or "")
 
 
 def shim_path():
-    """This driver's 32-bit LogitechLcd.dll, wherever the tree happens to be."""
     here = os.path.dirname(os.path.abspath(__file__))
-    for candidate in (
-        os.path.join(here, "..", "lcdsdk", "LogitechLcd.dll"),   # beside the scripts
-        os.path.join(here, "LogitechLcd.dll"),                    # installed next to this script
-        os.path.expanduser("~/.local/bin/LogitechLcd.dll"),
-    ):
+    for candidate in (os.path.join(here, "LogitechLcd.dll"),
+                      os.path.join(here, "..", "lcdsdk", "LogitechLcd.dll"),
+                      os.path.join(here, "g13-driver", "src", "lcdsdk", "LogitechLcd.dll")):
         if os.path.exists(candidate):
-            return os.path.realpath(candidate)
+            return os.path.abspath(candidate)
     return None
 
 
-def write_keys(registry_file, value):
-    """Adds the ServerBinary values to a Wine registry file, backing it up first."""
-    if not os.path.exists(registry_file):
-        return "there is no %s to write to" % registry_file
-    backup = registry_file + ".before-g13"
-    if not os.path.exists(backup):
-        shutil.copy2(registry_file, backup)
-    text = open(registry_file, encoding="utf-8", errors="ignore").read()
-    # Wine writes a key header as `[Software\\Classes\\...] <timestamp>`: path separators doubled,
-    # and a trailing epoch this replaces. The value keeps Windows' own escaping, so a backslash in
-    # a path is doubled there too.
-    stamp = str(int(time.time()))
-    for key in KEYS:
-        body = "[%s] %s\n@=\"%s\"\n\n" % (key, stamp, value.replace("\\", "\\\\"))
-        pattern = re.compile(r"^\[%s\](?: \d+)?\n(?:@=[^\n]*\n|[^\[])*?" % re.escape(key),
-                             re.MULTILINE)
-        if pattern.search(text):
-            text = pattern.sub(body, text, count=1)
-        else:
-            text = text.rstrip("\n") + "\n\n" + body
-    open(registry_file, "w", encoding="utf-8").write(text)
+def steam_prefixes():
+    found = []
+    for home in STEAM_HOMES:
+        for entry in sorted(glob.glob(os.path.expanduser(home) + "/steamapps/compatdata/*/pfx")):
+            if os.path.isdir(entry):
+                found.append((os.path.basename(os.path.dirname(entry)), entry))
+    return found
+
+
+def heroic_prefixes():
+    found = []
+    for entry in sorted(glob.glob(os.path.expanduser("~/Games/Heroic/Prefixes") + "/*")):
+        if os.path.isdir(entry):
+            found.append((os.path.basename(entry), entry))
+    return found
+
+
+def steam_prefix_for(appid):
+    for found_appid, path in steam_prefixes():
+        if found_appid == str(appid):
+            return path
     return None
 
 
-def remove_keys(registry_file):
-    """Takes the values back out again, leaving the rest of the file as it was."""
-    if not os.path.exists(registry_file):
-        return
-    text = open(registry_file, encoding="utf-8", errors="ignore").read()
-    for key in KEYS:
-        # Greedy on the value lines: a pattern that can match nothing would delete nothing, which
-        # is what a first attempt at this did.
-        text = re.sub(r"^\[%s\](?: \d+)?\n(?:@=.*\n)*\n?" % re.escape(key), "",
-                      text, flags=re.MULTILINE)
-    open(registry_file, "w", encoding="utf-8").write(text)
+def is_registered(prefix):
+    """Cheap: is the DLL in the prefix? Reading the key itself means a Wine launch (seconds)."""
+    return os.path.exists(os.path.join(prefix, "drive_c", "g13", "LogitechLcd.dll"))
+
+
+def key_is_readable(prefix):
+    code, output = wine_run(["reg", "query", LIVE], prefix)
+    return code == 0 and "LogitechLcd.dll" in output
 
 
 def register(prefix):
-    """Copies the shim in and writes the keys. Returns a line for the report."""
-    system_reg = os.path.join(prefix, "system.reg")
-    if not os.path.exists(system_reg):
-        return "no system.reg"
+    if not os.path.isdir(os.path.join(prefix, "drive_c")):
+        return "not a Wine prefix (no drive_c inside)"
     source = shim_path()
     if not source:
-        return "LogitechLcd.dll is not built (make -C g13-driver/src/lcdsdk windows)"
+        return "cannot find LogitechLcd.dll to install (build it with make windows)"
+    binaries, env, description = wine_for(prefix)
+    if not binaries:
+        return description
+    inside = os.path.join(prefix, "drive_c", "g13")
+    os.makedirs(inside, exist_ok=True)
+    shutil.copy2(source, os.path.join(inside, "LogitechLcd.dll"))
 
-    target = os.path.join(prefix, INSIDE_DIR)
-    os.makedirs(target, exist_ok=True)
-    shutil.copy2(source, os.path.join(target, "LogitechLcd.dll"))
+    for view in VIEWS:
+        code, output = wine_run(["reg", "add", view, "/ve", "/d", INSIDE, "/f"], prefix)
+        if code != 0:
+            return "wine (%s) could not write %s" % (description, view)
+    if not key_is_readable(prefix):
+        return "wrote the keys with %s but could not read them back" % description
+    return None
 
-    problem = write_keys(system_reg, INSIDE)
-    if problem:
-        return problem
-    return "registered, pointing at %s" % INSIDE
+
+def remove(prefix):
+    for view in VIEWS:
+        wine_run(["reg", "delete", view, "/f"], prefix)
+    shutil.rmtree(os.path.join(prefix, "drive_c", "g13"), ignore_errors=True)
+    return None
 
 
 def main(argv):
-    if not argv or argv[0] in ("-h", "--help"):
+    global FORCED_WINE
+    args = list(argv)
+    if "--help" in args or not args:
         print(__doc__.strip())
         return 0
-
-    if argv[0] == "--remove":
-        for prefix in argv[1:]:
-            remove_keys(os.path.join(prefix, "system.reg"))
-            print("removed from %s" % prefix)
+    if "--wine" in args:
+        at = args.index("--wine")
+        FORCED_WINE = args[at + 1] if len(args) > at + 1 else None
+        del args[at:at + 2]
+        if not FORCED_WINE or not os.path.exists(FORCED_WINE):
+            print("--wine needs the path to a wine binary")
+            return 1
+    if "--verify" in args:
+        at = args.index("--verify")
+        prefix = args[at + 1] if len(args) > at + 1 else ""
+        _, _, description = wine_for(prefix)
+        print("%-60s %s" % (prefix, "reads back" if key_is_readable(prefix) else "KEY MISSING"))
+        print("   using %s" % description)
+        return 0 if key_is_readable(prefix) else 1
+    if "--remove" in args:
+        args.remove("--remove")
+        for prefix in args:
+            remove(prefix)
+            print("%-60s key removed" % prefix)
+        return 0
+    if "--status" in args:
+        pairs = steam_prefixes() + heroic_prefixes()
+        if not pairs:
+            print("no Steam or Heroic prefixes found")
+            return 1
+        for name, path in pairs:
+            print("%-34s %-8s %s" % (name, "set up" if is_registered(path) else "-", path))
         return 0
 
-    if argv[0] == "--steam-appid":
-        if len(argv) != 2 or not argv[1].isdigit():
-            print("usage: g13-lcd-sdk-register --steam-appid 47810", file=sys.stderr)
-            return 2
-        found = [p for p in prefixes() if ("compatdata/%s/" % argv[1]) in p]
-        if not found:
-            print("no prefix for app %s - the game has to have been run once" % argv[1],
-                  file=sys.stderr)
+    if "--all" in args:
+        targets = steam_prefixes() + heroic_prefixes()
+        if not targets:
+            print("no Steam or Heroic prefixes found")
             return 1
-        targets = found
-    elif argv[0] == "--all":
-        targets = prefixes()
+    elif "--steam-appid" in args:
+        at = args.index("--steam-appid")
+        appid = args[at + 1] if len(args) > at + 1 else ""
+        prefix = steam_prefix_for(appid)
+        if not prefix:
+            print("Steam %s has to have been run once before its prefix exists" % appid)
+            return 1
+        targets = [(appid, prefix)]
     else:
-        targets = argv
+        targets = [("", path) for path in args]
 
-    if not targets:
-        print("no Wine prefixes found", file=sys.stderr)
-        return 1
-
-    failures = 0
-    for prefix in targets:
-        result = register(prefix)
-        print("%-72s %s" % (prefix.replace(os.path.expanduser("~"), "~"), result))
-        if "registered" not in result:
-            failures += 1
-    print()
-    print("A game that uses the Logitech LCD SDK now loads this driver's LogitechLcd.dll.")
-    print("It writes lcd-probe.log beside the DLL it loaded, which is %s." % INSIDE)
-    return 1 if failures else 0
+    failed = 0
+    for name, path in targets:
+        _, _, description = wine_for(path)
+        problem = register(path)
+        if problem:
+            failed = 1
+            print("%-52s %s" % (path, problem))
+        else:
+            print("%-52s registered via %s" % (path, description))
+    if not failed:
+        print("\nA game that uses the Logitech LCD SDK now loads this driver's LogitechLcd.dll.")
+        print("Start it and watch: `g13-visuals --status` says `an SDK client` while the game")
+        print("owns the screen. Nothing belongs in launch options, and it stays set up.")
+    return failed
 
 
 if __name__ == "__main__":
