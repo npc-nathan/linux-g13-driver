@@ -349,6 +349,26 @@ check("and who owns the screen", True, "screen:" in output)
 
 check("none of that started a daemon", 0, code)
 
+# A thin environment - no XDG_RUNTIME_DIR, as when a command is run by hand or over SSH - must not
+# look in a different place from the running services, or a daemon that is plainly running is
+# reported as absent. This was a real false alarm: --status said "not running" while the pad was
+# being drawn by a daemon that was in /run/user/<uid> all along.
+without = dict(os.environ)
+without.pop("XDG_RUNTIME_DIR", None)
+thin = subprocess.run([sys.executable, "-c",
+                       "import importlib.machinery, importlib.util, sys;"
+                       "loader = importlib.machinery.SourceFileLoader('gv', %r);"
+                       "spec = importlib.util.spec_from_loader('gv', loader);"
+                       "module = importlib.util.module_from_spec(spec);"
+                       "loader.exec_module(module);"
+                       "print(module.runtime_path('g13-values.json'))" % DAEMON],
+                      capture_output=True, text=True, timeout=120, env=without,
+                      cwd=os.path.dirname(DAEMON))
+where_the_services_are = ("/run/user/%d" % os.getuid()
+                          if os.path.isdir("/run/user/%d" % os.getuid()) else "/tmp")
+check("with no XDG_RUNTIME_DIR, paths agree with the services",
+      where_the_services_are + "/g13-values.json", thin.stdout.strip())
+
 # --- designed applets are found on disk and show up as visuals ---
 os.makedirs("/tmp/visualstest/g13/applets", exist_ok=True)
 with open("/tmp/visualstest/g13/applets/uptime.json", "w") as handle:

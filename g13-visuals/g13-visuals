@@ -1138,7 +1138,18 @@ SDK_CLIENT_FRESH_SECONDS = 3.0
 
 
 def runtime_path(name):
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+    """Where the driver, the daemon and the tools meet: a FIFO, a socket or a state file.
+
+    `XDG_RUNTIME_DIR` comes first. Without it - a hand-run command, an SSH session, a tool started
+    by something that does not inherit the login environment - the user's own runtime directory is
+    used if it exists, because that is where the *services* put these files, and agreeing with the
+    running services matters more than the old habit of falling back to /tmp. A daemon that is
+    plainly running must not be reported as absent because the caller's environment was thin.
+    """
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        candidate = "/run/user/%d" % os.getuid()
+        runtime = candidate if os.path.isdir(candidate) else "/tmp"
     return os.path.join(runtime, name)
 
 
