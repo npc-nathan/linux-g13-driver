@@ -1,0 +1,28 @@
+# Maintainer: this fork's author
+#
+# A recipe, not a binary: building it yourself is the point, because the code this is built from
+# carries no licence and may not be redistributed without the original author's permission.
+pkgname=linux-g13-driver
+pkgver=0.9.0
+pkgrel=1
+pkgdesc="Logitech G13 driver, configuration tool and screen applets"
+arch=('x86_64')
+url="https://github.com/npc-nathan/linux-g13-driver"
+license=('custom:no-licence-upstream')
+depends=('libusb' 'gtk3' 'libayatana-appindicator' 'jre-openjdk' 'python')
+makedepends=('cmake' 'gcc' 'maven' 'jdk-openjdk')
+install="$pkgname.install"
+options=('!strip')
+
+build() {
+    cd "$srcdir/$pkgname"
+    make -C g13-driver/src all
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+    make -C g13-driver/src install DESTDIR="$pkgdir" PREFIX=/usr
+}
+
+# The keyboard needs a udev rule and the user's own group before it will talk to anything, which is
+# why this has a .install script: the message after installing tells the user what to do next.

@@ -4,3 +4,15 @@ g13-driver/build/
 g13-driver/Linux-G13-Driver
 g13-config-tool/target/
 g13-config-tool/g13-gui
+
+# A configuration file with addresses and tokens in it, and the agent's own secrets: if one is ever
+# copied into the tree by mistake it must not be committable.
+endpoints.json
+sources.json
+.env
+*.token
+hosts.yml
+
+# Packaging output: built here, never committed
+packaging/stage/
+packaging/*.deb

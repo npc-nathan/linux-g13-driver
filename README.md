@@ -23,6 +23,27 @@ The original project is over 10 years old. This fork has been refactored to use 
 * **Helpers you can script.** `g13-lcd`, `g13-watch`, `g13-keywatch`, `g13-buttons`,
   `g13-service`, and a test suite covering all of it (`make test`).
 
+## Licence and credit
+
+This is a fork of [Lordbooker/linux-g13-driver](https://github.com/Lordbooker/linux-g13-driver), which
+is itself a continuation of earlier work (Tetz95, jim.gupta and others are in the history). **That
+project carries no licence**, and neither does this one. Under GitHub's terms of service that means
+anybody may view and fork it on GitHub — which is what a public fork relies on — but it also means
+the default copyright rules apply: the code may not be redistributed, and no derivative work may be
+made from it, without the permission of its authors. Nothing here grants you a licence that the
+original authors did not give.
+
+Practically, that means:
+
+* **Reading, forking and contributing**: fine, and welcome. Contributors keep their own copyright.
+* **Redistributing, packaging, or shipping a built binary**: ask the original author first.
+* **Adding a licence**: is Lordbooker's call as the maintainer, not ours to make unilaterally. If it
+  is ever licensed, this file will say so and name the terms.
+
+The files written for this fork — the visuals daemon and its applet format, the source kinds, the
+command line tools, the tests and documentation — are the work of this fork's author and are offered
+on the same basis: ask before redistributing, and credit this project and the original.
+
 ## Requirements
 
 ### Base Requirements
@@ -34,11 +55,21 @@ You need to install the following packages via your package manager:
 * `libusb-1.0-0` (on some distros named `libusb-1.0-0-dev` or `libusb1-devel`)
 * `libappindicator-gtk3` (or `libayatana-appindicator3-dev` on Debian/Ubuntu 22.04+)
 * `Maven` and `Java 17` or higher (for the configuration tool)
-* `python3` (the screen tools and the tests are standard library only)
+* `python3` **3.9 or newer** (the screen tools and the tests are standard library only; the
+  mailbox source uses an argument added in 3.9)
 
 Optional:
 
 * `evtest` - what `g13-keywatch` runs, to see what a key actually sends
+
+`make all` installs the above for you with `sudo` before building. If you would rather use your own
+package manager, run `make build-driver build-gui` instead - that builds and asks for nothing.
+
+### Installing from a package
+
+`packaging/` holds recipes for a `.deb` and for Arch (`PKGBUILD`). They build from a checkout and
+leave the package beside the script; nothing is installed for you. They are recipes rather than
+published binaries on purpose - see **Licence and credit** above.
 
 ### Automated Dependency Installation
 
