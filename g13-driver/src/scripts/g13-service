@@ -1,12 +1,11 @@
 #!/bin/sh
 # Start, stop, restart or report the G13 services, and say so on the desktop.
 #
-#   g13-service [start|stop|restart|status] [driver|visuals|bridge|all]
+#   g13-service [start|stop|restart|status] [driver|visuals|all]
 #
 #   driver   the pad itself: keys, profiles and the LCD          (g13.service)
 #   visuals  what draws on the screen: applets and the menu     (g13-visuals.service)
-#   bridge   lets Windows programs under Wine/Proton drive it   (g13-lcd-bridge.service)
-#   all      the three of them
+#   both of them
 #
 # The second word defaults to "driver", so the "G13 Start Driver" / "G13 Stop Driver" menu
 # entries keep working exactly as they did.
@@ -53,14 +52,13 @@ units_for() {
     case "$1" in
         driver)  echo "g13.service" ;;
         visuals) echo "g13-visuals.service" ;;
-        bridge)  echo "g13-lcd-bridge.service" ;;
-        all)     echo "g13.service g13-visuals.service g13-lcd-bridge.service" ;;
+        all)     echo "g13.service g13-visuals.service" ;;
         *)       echo "" ;;
     esac
 }
 
 usage() {
-    echo "usage: $0 [start|stop|restart|status] [driver|visuals|bridge|all]" >&2
+    echo "usage: $0 [start|stop|restart|status] [driver|visuals|all]" >&2
 }
 
 UNITS="$(units_for "$TARGET")"

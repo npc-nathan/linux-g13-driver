@@ -11,7 +11,6 @@ set -u
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPTS="$REPO/g13-driver/src/scripts"
-LCDSDK="$REPO/g13-driver/src/lcdsdk"
 CLASSES="$REPO/g13-config-tool/target/classes"
 TESTS="$REPO/tests"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/g13-tests-XXXXXX")"
@@ -37,21 +36,16 @@ run() {
 }
 
 missing() {
-    echo "missing: $1 - build first (make all, or make build-lcdsdk build-gui)"
+    echo "missing: $1 - build first (make all, or make build-gui)"
     exit 2
 }
 
-[ -x "$LCDSDK/lcdsdk-selftest" ] || missing "$LCDSDK/lcdsdk-selftest"
 [ -d "$CLASSES" ] || missing "$CLASSES"
 
 if ! command -v java >/dev/null 2>&1; then
     echo "java is needed for the tool's tests"
     exit 2
 fi
-
-echo "Logitech LCD SDK"
-run "native library and frames" python3 "$SCRIPTS/lcdsdk-test.py"
-run "the Windows path, through the bridge" python3 "$SCRIPTS/lcdsdk-proxy-test.py"
 
 echo
 echo "The screen's visuals"
@@ -78,8 +72,6 @@ run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/
     python3 "$SCRIPTS/g13-applet" check --all
 
 run "the guide agrees with the code" python3 "$TESTS/DocTest.py"
-run "telling a game that wants the SDK from one that does not" python3 "$TESTS/GameCheckTest.py"
-run "registering the shim where Logitech's SDK loader looks" python3 "$TESTS/SdkRegisterTest.py"
 
 echo
 echo "The applet tool"

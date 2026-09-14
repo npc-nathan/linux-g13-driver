@@ -16,7 +16,8 @@ The original project is over 10 years old. This fork has been refactored to use 
   down, select).
 * **Applets in JSON.** A screen can be described rather than programmed: widgets bound to
   data sources, live values, and the config tool previews it against real data.
-* **The Logitech LCD SDK, on Linux.** The functions games and applets call on Windows
+* **Games, through mods, one game at a time.** Applets read what a mod writes - a JSON file
+  with `json:`, or a log line with `regex:`. (The old Logitech SDK route is gone: see below.)
   (`LogiLcdInit`, `LogiLcdMonoSetText`, ...) implemented here, including a PE
   `LogitechLcd.dll` for games running under Wine/Proton, with `g13-lcd-bridge` relaying.
 * **A Java configuration tool.** Java 17 and Maven, with keys, profiles, macros, and a Screen
@@ -39,8 +40,6 @@ You need to install the following packages via your package manager:
 
 Optional:
 
-* `mingw-w64` - to build the Windows `LogitechLcd.dll` for games under Wine/Proton
-  (`make build-lcdsdk-windows`)
 * `evtest` - what `g13-keywatch` runs, to see what a key actually sends
 
 ### Automated Dependency Installation
@@ -59,7 +58,7 @@ chmod +x install_deps.sh
 2.  Build everything:
 
     ```bash
-    make all          # the driver, the configuration tool, and the Logitech LCD SDK
+    make all          # the driver and the configuration tool
     make test         # every test in the repository, without touching the device
     ```
 
@@ -78,7 +77,7 @@ Nothing is started for you: a system install never touches your session. Enable 
 user services once:
 
 ```bash
-systemctl --user enable --now g13 g13-visuals g13-lcd-bridge
+systemctl --user enable --now g13 g13-visuals
 ```
 
 To take it all back out: `sudo make uninstall` (see **Uninstallation** at the end).
@@ -104,13 +103,11 @@ back after a change, `make enable-services` (or `g13-service start all`). To tak
 | `linux-g13-driver` | the driver itself, run as `g13.service` |
 | `g13-gui` / `Linux-G13-GUI.jar` | the configuration tool: keys, profiles, macros, the Screen, Sources and designer windows |
 | `g13-visuals` | draws on the screen and runs the menu (`g13-visuals.service`) |
-| `g13-lcd-bridge` | relays a Windows `LogitechLcd.dll` to the driver (`g13-lcd-bridge.service`) |
 | `g13-lcd` / `g13lcd.py` | text, images and frames on the screen, as a tool or an importable module |
 | `g13-buttons` | says or sets who owns the screen and the four buttons (`auto`, `visuals`, `sdk`) |
 | `g13-service` | start, stop or restart the services, with a desktop notification |
 | `g13-keywatch` / `g13-watch` | what the pad sends / the event bus it publishes |
 | `g13-applet` | checks an applet before it reaches the pad (`g13-applet check FILE`, `--all`) |
-| `liblogitechlcd.so`, `LogitechLcd.h` | the Logitech LCD SDK for programs here; `LogitechLcd.dll` for Windows ones |
 
 The menu entries (`G13 Configuration`, `G13 Start Driver`, `G13 Stop Driver`, `G13 Start All`,
 `G13 Stop All`) land in your applications menu.
@@ -219,179 +216,23 @@ module - `g13lcd.at()`, `g13lcd.frame()`, `g13lcd.pixels_to_frame()` - so a game
 its own stats on the screen.
 
 The mechanism is the reproducible part: an application pushes data and the driver renders it.
-Logitech's own way of doing that - the SDK games and applets call on Windows - is implemented
-here too, including the Windows library itself for games under Wine or Proton: see
-[The Logitech LCD SDK, on Linux](#the-logitech-lcd-sdk-on-linux) below. Games that never used
-it (and have no mod support) are still out of reach; nothing on Linux can make a game draw
-somewhere it never tried to.
+The way a game gets there is a **mod**: one that writes a JSON file is read with `json:`, one
+that can only print a line is read with `regex:`. See
+[Logitech's LCD SDK, and why it is not here](#logitechs-lcd-sdk-and-why-it-is-not-here).
 
-## The Logitech LCD SDK, on Linux
+## Logitech's LCD SDK, and why it is not here
 
-Games and applets written against Logitech's SDK call `LogitechLcd.dll`, which ships with
-Logitech Gaming Software on Windows - which is why a panel like this one shows nothing from
-them here, and why "Logitech supports this game" never helped on Linux. `src/lcdsdk/` is that
-missing half: the same functions, the same types, the same button bits, forwarding to this
-driver.
+Games and applets written against Logitech's SDK call `LogitechLcd.dll`, which ships with Logitech
+Gaming Software - and that SDK only works **while that software is installed** (G HUB dropped LCD
+support in 2022.7). No Wine or Proton prefix can supply it, so a game that would use the SDK finds
+nothing there, and a game that never used it was never reachable in the first place. Both halves
+were built and tested here - the shim, the bridge, and a tool that registered it in a game's prefix -
+and then removed: they are in this repository's history if anyone wants them back.
 
-    make build-lcdsdk          # liblogitechlcd.so and the self-test
-    make test-lcdsdk           # the whole surface, checked without a device
-    make build-lcdsdk-windows  # a proxy LogitechLcd.dll for Wine/Proton; needs mingw-w64
-
-`make install-user` puts the library in `~/.local/lib` and the header in `~/.local/include`.
-
-What each call becomes:
-
-| SDK call | here |
-| --- | --- |
-| `LogiLcdInit(name, MONO)` | opens the driver's LCD pipe; false when the driver is not running |
-| `LogiLcdIsConnected(MONO)` | whether that pipe is open - `COLOR` is always false, this panel is monochrome |
-| `LogiLcdMonoSetText(line, text)` | line 0..3, drawn at x=3, y = 2 + 10 * line |
-| `LogiLcdMonoSetBackground(bitmap)` | the whole 160x43 field, 8 bits per pixel, pixel on at >= 128 |
-| `LogiLcdUpdate()` | one frame: the background as `#bitmap`, then the text lines as `#text` |
-| `LogiLcdIsButtonPressed(mask)` | the four mono buttons (`0x01, 0x02, 0x04, 0x08`) are L1..L4 on the pad |
-| `LogiLcdShutdown()` | closes up |
-
-`LogiLcdUpdate()` writes the whole frame in a single write, because the driver paints whatever
-arrives in one `read()` as one frame - which is what keeps a screen built from several lines
-from flickering.
-
-Limits, stated rather than discovered later: two programs calling `LogiLcdUpdate()` will fight
-over the screen (Logitech's LCD Manager rotated between applets; there is no manager here).
-
-### A Windows game under Wine or Proton
-
-The same SDK, as a Windows DLL, so a game with native Logitech LCD support can drive the pad under
-Proton. Two builds, because the game decides which it can load — a 2009 title like Dragon Age:
-Origins is 32-bit and cannot load a 64-bit library:
-
-```bash
-make -C g13-driver/src/lcdsdk windows
-# LogitechLcd.dll      32-bit, the name an LCD-era game asks for
-# LogitechLcd.x64.dll  64-bit, for a modern one
-```
-
-Copy the matching one into the folder holding the game's executable, **as `LogitechLcd.dll`** (that
-is the name every game loads), and make sure `g13-lcd-bridge` is running — the DLL talks to it over
-`127.0.0.1:51513`, which Wine shares with the host:
-
-```bash
-cp LogitechLcd.dll "~/.steam/steam/steamapps/common/<game>/path/to/exe/"
-systemctl --user status g13-lcd-bridge
-```
-
-In Steam, force a Proton version in the game's Properties → Compatibility. The launch option
-`WINEDLLOVERRIDES="LogitechLcd=n,b"` is not needed when the DLL sits beside the executable, but it
-does no harm if a game is awkward about it.
-
-**How a game finds this DLL at all, which is not obvious.** The Logitech LCD SDK is not found by
-name. Its own loader asks Windows for a class id —
-
-```
-{d0e790a5-01a7-49ae-ae0b-e986bdd0c21b}
-```
-
-— and reads the `ServerBinary` value under it (a 32-bit program under
-`HKEY_CLASSES_ROOT\\Wow6432Node\\CLSID\\{…}\\ServerBinary`). Logitech Gaming Software writes that
-key when it installs; a Wine prefix has no Logitech software in it, so the key is absent and a game
-that uses the SDK finds nothing — with no error, because a failed `LoadLibrary` is silent. That is
-the whole reason a game can support the LCD while containing no trace of Logitech's name.
-
-```bash
-g13-lcd-sdk-register --steam-appid 47810      # one Steam prefix
-g13-lcd-sdk-register --all                    # every Steam and Heroic prefix
-g13-lcd-sdk-register --remove <prefix>
-```
-
-It copies the DLL to `C:\g13\LogitechLcd.dll` inside the prefix, writes the three views of that
-class id into `system.reg` (backing the file up first), and touches nothing else. A game that uses
-the SDK from then on loads **this** DLL — and therefore writes the probe log.
-
-**If nothing appears, the DLL says why.** It writes `lcd-probe.log` beside itself when it is loaded
-and when the game first draws, so the answer is a file rather than a guess:
-
-```bash
-cat "…/path/to/exe/lcd-probe.log"
-```
-
-| line | what it means |
-|---|---|
-| `loaded LogitechLcd.dll (32-bit)` | the game loaded it: it does look for this SDK |
-| `LogiLcdInit(name="…", type=…)` | the game initialised it, and that is the name it calls itself |
-| `LogiLcdUpdate: first frame, line 0 = "…"` | it drew something, so the pad should be showing it |
-| `cannot reach g13-lcd-bridge on 127.0.0.1:51513` | the bridge is not running, or `G13_LCD_TCP` points somewhere else |
-| the file does not exist at all | the game never loaded it — it wants another name or another SDK |
-
-**Ask first, install later.** `g13-lcd-game-check` reads a game's executables and says which kind
-of Logitech LCD support it has, which is a second rather than a 20 GB download:
-
-```bash
-g13-lcd-game-check "~/.steam/steam/steamapps/common/Some Game"
-g13-lcd-game-check --steam          # every installed Steam game
-```
-
-It distinguishes the cases that need different answers:
-
-| what it finds | what it means |
-|---|---|
-| the **Logitech LCD SDK** (`LogiLcdInit`) | what this shim implements — it tells you which build to copy and where |
-| the **older LCD Manager API** (`lgLcdInit`) | a different set of calls, needing a second shim |
-| **the driver's device** (`LGVirHid`) | opened directly; cannot be stood in for from outside Windows |
-| **the LCD middleware** (`CLCDManager`, `CEzLcd`) | built to draw on an LCD, but names no Logitech library — the games that do this are driven by Logitech's own software reading them, so a shim has nothing to stand in for. Dragon Age: Origins and The Witcher are both this case |
-| **an LCD helper in the game's own scripts** | the feature exists in the game. On Windows its native half is what an SDK call would drive; a Linux port can have the scripts and not the hardware half (Borderlands 2 on Linux) |
-
-It reads Linux binaries too, so a game with a native port is still judged, and it ignores case,
-because a DLL is named whatever the linker felt like that day. Packed executables can hide their own
-names — Dragon Age: Origins does — so "nothing found" means "nothing findable this way".
-
-While a game owns the screen, `g13-visuals --status` says so (`screen: an SDK client has it`), and
-the pad stops cycling. Deleting that one DLL from the game folder undoes the whole thing.
-
-### Games under Wine or Proton
-
-A Windows program cannot use the driver's Unix sockets, so the Windows build of the library
-talks to `g13-lcd-bridge` over TCP on 127.0.0.1 instead, and the bridge relays both ways
-(frames down to the driver, button events back up):
-
-    make -C g13-driver/src/lcdsdk windows   # a PE32+ LogitechLcd.dll, built with mingw-w64
-    g13-lcd-bridge                          # the other half of that conversation
-
-Put the DLL in the game's prefix with a DLL override (`WINEDLLOVERRIDES=LogitechLcd=n,b`) and
-run the bridge. `G13_LCD_TCP=host:port` overrides where the library looks.
-
-The Windows transport is also built for Linux (`-DG13_TCP_TRANSPORT=1`), which is how it is
-tested here without Wine: `make test-lcdsdk-proxy` runs the same code through the bridge,
-checks the frames pixel by pixel, the button events coming back, and that the DLL's exports
-are the SDK's ten. What has *not* been run is a real game under Proton - the plumbing is
-proven, the game is not.
-
-An example client, in Python, using the same library a game would load:
-
-    python3 g13-driver/src/lcdsdk/example-logitech-lcd.py
-
-### Who owns the screen and the four buttons
-
-The buttons beside the screen are shared: the visuals menu uses them, and so does an SDK
-client (that is what its button query is for). One setting decides:
-
-| mode | the screen and L1-L4 |
-| --- | --- |
-| `auto` (default) | an SDK client takes over while it is connected, otherwise the visuals |
-| `visuals` | the visuals always keep them - an SDK client would have to wait |
-| `sdk` | an SDK client always has them, connected or not |
-
-    g13-buttons            # show the mode, and who has the screen now
-    g13-buttons auto       # or visuals, or sdk
-
-The same control is in the config tool's **Screen** window ("Screen and L1-L4"), and in the
-file both write: `$XDG_CONFIG_HOME/g13/button-mode`. It applies within a second - no restart,
-no confirm button.
-
-How the daemon knows a client is there: the library touches `$XDG_RUNTIME_DIR/g13-sdk-client`
-on every frame, and the bridge keeps it fresh while a Windows client is connected. A file
-older than three seconds counts as gone, so a client that is killed outright cannot leave the
-pad deaf to its own buttons. While a client owns the screen the daemon stops drawing and
-stops reading the buttons, and it says so in the tool ("now: the SDK client"): the preview
-then shows the last frame the visuals drew, not what is on the panel.
+What is left is the part that works: an application pushes data, the driver renders it, and an
+applet reads it through [the kinds of source](docs/applets.md#the-kinds-of-source). That makes a
+game reachable by writing a mod for it, one game at a time, which is a smaller job than it sounds
+because the data is usually already there.
 
 ## A game on the screen: Cyberpunk 2077
 

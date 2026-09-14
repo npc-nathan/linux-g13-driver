@@ -2,9 +2,5 @@ __pycache__/
 *.pyc
 g13-driver/build/
 g13-driver/Linux-G13-Driver
-g13-driver/src/lcdsdk/*.so
-g13-driver/src/lcdsdk/lcdsdk-selftest
-g13-driver/src/lcdsdk/lcdsdk-selftest-tcp
-g13-driver/src/lcdsdk/LogitechLcd.dll
 g13-config-tool/target/
 g13-config-tool/g13-gui
