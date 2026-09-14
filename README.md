@@ -298,6 +298,20 @@ cat "…/path/to/exe/lcd-probe.log"
 | `cannot reach g13-lcd-bridge on 127.0.0.1:51513` | the bridge is not running, or `G13_LCD_TCP` points somewhere else |
 | the file does not exist at all | the game never loaded it — it wants another name or another SDK |
 
+**Ask first, install later.** `g13-lcd-game-check` reads a game's executables and says which kind
+of Logitech LCD support it has, which is a second rather than a 20 GB download:
+
+```bash
+g13-lcd-game-check "~/.steam/steam/steamapps/common/Some Game"
+g13-lcd-game-check --steam          # every installed Steam game
+```
+
+It distinguishes the three cases that need different answers: the **Logitech LCD SDK** (`LogiLcdInit`,
+what this shim implements — it tells you which build to copy and where), the **older LCD Manager
+API** (`lgLcdInit`, a different set of calls), and a game that opens **the driver's device itself**
+(`LGVirHid`, which cannot be stood in for from outside Windows). Packed executables can hide their
+own names — Dragon Age: Origins does — so "nothing found" means "nothing findable this way".
+
 While a game owns the screen, `g13-visuals --status` says so (`screen: an SDK client has it`), and
 the pad stops cycling. Deleting that one DLL from the game folder undoes the whole thing.
 

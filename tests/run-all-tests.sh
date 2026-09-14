@@ -78,6 +78,7 @@ run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/
     python3 "$SCRIPTS/g13-applet" check --all
 
 run "the guide agrees with the code" python3 "$TESTS/DocTest.py"
+run "telling a game that wants the SDK from one that does not" python3 "$TESTS/GameCheckTest.py"
 
 echo
 echo "The applet tool"
