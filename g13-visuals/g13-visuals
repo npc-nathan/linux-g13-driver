@@ -1551,7 +1551,8 @@ CLI_HELP = """g13-visuals - the pad's screen.
     g13-visuals --status           what is showing, who owns the screen, is the daemon up
     g13-visuals --sources          what data applets may read, and what is switched off
     g13-visuals --enable-source K  let applets read that kind of source again
-    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd
+    g13-visuals --disable-source K stop them: built-in, env, file, json, cmd, http
+    g13-visuals --read SPEC        read one source, exactly as an applet would see it
 
 NAME is a visual's name (clock, system, media, pad, custom), an applet (applet:cp2077-hud, or
 just cp2077-hud), or a title as it appears on the pad.
@@ -1649,6 +1650,33 @@ def cli_sources(visuals, values):
     return 0
 
 
+def cli_read(spec, values):
+    """Prints one source, exactly as an applet would see it.
+
+    This is what the sources window's Test button runs, so an endpoint is proved by the code that
+    will read it on the pad rather than by a second opinion about how to fetch a web address.
+    """
+    kind = source_kind(spec)
+    print("  %s" % spec)
+    if kind in values.blocked_kinds():
+        print("  empty: the %s kind is switched off in the sources window" % kind)
+        return 0
+
+    value = values.raw(spec)
+    print("  -> %r" % value)
+    if value != "":
+        return 0
+
+    print("  empty: nothing there, or nothing readable. An applet would show blank.")
+    if kind == "http":
+        endpoint, _path, _field = split_http(spec)
+        if endpoint not in values.endpoints():
+            print("  no endpoint called %r in %s - a web address is named there, with its token,"
+                  % (endpoint, config_dir() / ENDPOINTS_FILE))
+            print("  so that an applet can carry the name and not the credential.")
+    return 0
+
+
 def cli_status(visuals, values):
     config = read_config()
     published, age = published_state()
@@ -1728,6 +1756,12 @@ def answer(argv, visuals, values):
         return cli_status(visuals, values)
     if action == "sources" and not arguments:
         return cli_sources(visuals, values)
+
+    if action == "read":
+        if len(arguments) != 1:
+            print("usage: g13-visuals --read SPEC", file=sys.stderr)
+            return 2
+        return cli_read(arguments[0], values)
 
     if action in ("enable-source", "disable-source"):
         kinds = [name for name, _why in SOURCE_KINDS]

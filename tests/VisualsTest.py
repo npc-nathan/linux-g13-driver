@@ -804,6 +804,40 @@ check("http: an applet draws a value from a web address", True,
       any(message.startswith("21C") for _x, _y, message in _over_http_screen.texts))
 _over_http_applet.unlink()
 
+# --- g13-visuals --read: the command the sources window's Test button runs ---------------------
+# It has to be the daemon's own reader, or a Test button could pass while the pad shows nothing.
+_daemon_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "g13-visuals",
+                              "g13-visuals")
+
+
+def read_source(*arguments):
+    """Runs the command line as the Test button does, and gives back (exit code, output)."""
+    finished = subprocess.run([sys.executable, _daemon_script, "--read"] + list(arguments),
+                              capture_output=True, text=True, timeout=30)
+    return finished.returncode, finished.stdout + finished.stderr
+
+
+_code, _output = read_source("http:home#state")
+check("read: a live address prints its value", True, "'on'" in _output)
+check("read: and says nothing about being empty", False, "empty" in _output)
+
+_code, _output = read_source("http:nowhere/x#state")
+check("read: an address that is not named says so", True, "no endpoint called 'nowhere'" in _output)
+
+_code, _output = read_source("cmd:echo hello")
+check("read: any kind of source can be read", True, "'hello'" in _output)
+
+# Switched off in the panel, it says that rather than looking broken.
+_off_file = gv.config_dir() / gv.SOURCES_FILE
+_off_file.write_text(json.dumps({"disabled": ["http"]}))
+_code, _output = read_source("http:home#state")
+check("read: a switched-off kind says so", True, "switched off in the sources window" in _output)
+_off_file.unlink()
+
+_code, _output = read_source()
+check("read: no spec is a usage error", 2, _code)
+check("read: and it says what to type", True, "usage: g13-visuals --read SPEC" in _output)
+
 _probe.shutdown()
 _endpoints_file.unlink()
 

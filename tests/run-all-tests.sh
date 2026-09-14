@@ -70,6 +70,8 @@ run "the sources panel and what it switches" env XDG_CONFIG_HOME="$SCRATCH/confi
 # The designer writes into a directory of its own: the sources panel's suite deliberately leaves
 # broken applets in the shared one to prove the checker reports them, and a check of *this*
 # directory should only ever be judging what the designer produced.
+run "the endpoints editor, and where the token lives" env XDG_CONFIG_HOME="$SCRATCH/designer" \
+    java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" "$TESTS/EndpointsTest.java"
 run "the designer's model, and the applet it writes" env XDG_CONFIG_HOME="$SCRATCH/designer" \
     java -Djava.awt.headless=true -cp "$CLASSES:$TESTS" "$TESTS/AppletEditorTest.java"
 run "and that applet is one the pad would accept" env XDG_CONFIG_HOME="$SCRATCH/designer" \

@@ -114,6 +114,119 @@ public class Sources {
         }
     }
 
+    /** One named web address, and the credential that goes with it. */
+    public static final class Endpoint {
+        /** The base address, e.g. http://homeassistant.local:8123. */
+        public String url = "";
+        /** The bearer token, if any. Kept in this file so an applet never has to carry it. */
+        public String token = "";
+        /** Seconds to wait, or 0 for the daemon's own default. */
+        public double timeout = 0;
+        /** Whether to accept a certificate that does not check out, for a local server. */
+        public boolean insecure = false;
+        /** Anything else the file held - headers, say - kept so editing here does not lose it. */
+        public final java.util.Map<String, Object> rest = new java.util.LinkedHashMap<>();
+    }
+
+    /** The file the daemon reads the named web addresses from. */
+    public static Path endpointsFile() {
+        return Visuals.configDir().resolve("endpoints.json");
+    }
+
+    /** One value out of a map whose type is not known, as text. */
+    private static String text(final java.util.Map<?, ?> map, final String key) {
+        final Object value = map.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /**
+     * Whether a name can be an endpoint's key.
+     * @param name The name to check.
+     * @return true when it is letters, digits, hyphens and underscores.
+     */
+    public static boolean validEndpointName(final String name) {
+        return name != null && name.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,40}");
+    }
+
+    /**
+     * The named web addresses, in the order the file lists them.
+     * @return name to endpoint.
+     */
+    public static java.util.Map<String, Endpoint> endpoints() {
+        final java.util.Map<String, Endpoint> found = new java.util.LinkedHashMap<>();
+        try {
+            final Object parsed = Json.parse(Files.readString(endpointsFile()));
+            if (!(parsed instanceof java.util.Map)) {
+                return found;
+            }
+            for (final java.util.Map.Entry<?, ?> entry :
+                    ((java.util.Map<?, ?>) parsed).entrySet()) {
+                if (!(entry.getValue() instanceof java.util.Map)) {
+                    continue;
+                }
+                final java.util.Map<?, ?> raw = (java.util.Map<?, ?>) entry.getValue();
+                final Endpoint endpoint = new Endpoint();
+                endpoint.url = text(raw, "url");
+                endpoint.token = text(raw, "token");
+                endpoint.timeout = raw.get("timeout") instanceof Number
+                        ? ((Number) raw.get("timeout")).doubleValue() : 0;
+                endpoint.insecure = Boolean.TRUE.equals(raw.get("insecure"));
+                for (final java.util.Map.Entry<?, ?> pair : raw.entrySet()) {
+                    final String key = String.valueOf(pair.getKey());
+                    if (!key.equals("url") && !key.equals("token") && !key.equals("timeout")
+                            && !key.equals("insecure")) {
+                        endpoint.rest.put(key, pair.getValue());
+                    }
+                }
+                found.put(String.valueOf(entry.getKey()), endpoint);
+            }
+        } catch (IOException | RuntimeException absentOrUnreadable) {
+            return new java.util.LinkedHashMap<>();
+        }
+        return found;
+    }
+
+    /**
+     * Writes the named web addresses, and nothing else can read the file.
+     * @param endpoints Name to endpoint, in the order to write them.
+     */
+    public static void saveEndpoints(final java.util.Map<String, Endpoint> endpoints) {
+        final java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        for (final java.util.Map.Entry<String, Endpoint> entry : endpoints.entrySet()) {
+            if (!validEndpointName(entry.getKey())) {
+                throw new IllegalArgumentException("an endpoint name cannot be: " + entry.getKey());
+            }
+            final Endpoint endpoint = entry.getValue();
+            final java.util.Map<String, Object> one = new java.util.LinkedHashMap<>();
+            one.put("url", endpoint.url);
+            if (!endpoint.token.isEmpty()) {
+                one.put("token", endpoint.token);
+            }
+            if (endpoint.timeout > 0) {
+                one.put("timeout", endpoint.timeout);
+            }
+            if (endpoint.insecure) {
+                one.put("insecure", true);
+            }
+            one.putAll(endpoint.rest);
+            out.put(entry.getKey(), one);
+        }
+        try {
+            Files.createDirectories(endpointsFile().getParent());
+            Files.writeString(endpointsFile(), Json.write(out));
+            // A token lives in here: keep it to its owner, and say so rather than hoping.
+            try {
+                Files.setPosixFilePermissions(endpointsFile(),
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException | IOException notPosix) {
+                // A filesystem without permissions: the file is still written, and the window says
+                // which way it went.
+            }
+        } catch (IOException error) {
+            throw new IllegalStateException("could not write " + endpointsFile(), error);
+        }
+    }
+
     /**
      * Whether a name is one of the kinds.
      * @param name The name to check.

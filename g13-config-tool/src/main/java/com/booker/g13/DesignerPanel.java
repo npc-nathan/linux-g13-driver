@@ -371,38 +371,9 @@ public class DesignerPanel {
 
     /** Asks the repository's own checker what this applet's sources read at this moment. */
     private void readNow() {
-        final java.io.File checker = checkerPath();
-        if (checker == null) {
-            readings.setText("cannot find g13-applet. It is installed with the driver:\n"
-                    + "  make install-user        (puts it in ~/.local/bin)");
-            return;
-        }
-        try {
-            final Process process = new ProcessBuilder(checker.getAbsolutePath(), "check",
-                    AppletEditor.path(appletName).toString(), "--values")
-                    .redirectErrorStream(true).start();
-            // Quick enough to run in place: it is one file, and a few sources at most.
-            final String output = new String(process.getInputStream().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            process.waitFor();
-            readings.setText(output);
-            readings.setCaretPosition(0);
-        } catch (IOException | InterruptedException failed) {
-            readings.setText("cannot run g13-applet: " + failed.getMessage());
-        }
-    }
-
-    /** Where the checker is, if it is installed. */
-    private static java.io.File checkerPath() {
-        final String home = System.getProperty("user.home", "");
-        for (final String candidate : new String[]{home + "/.local/bin/g13-applet",
-                "/usr/local/bin/g13-applet", "/usr/bin/g13-applet"}) {
-            final java.io.File file = new java.io.File(candidate);
-            if (file.canExecute()) {
-                return file;
-            }
-        }
-        return null;
+        readings.setText(Installed.run(Installed.command("g13-applet"), "check",
+                AppletEditor.path(appletName).toString(), "--values"));
+        readings.setCaretPosition(0);
     }
 
     private JPanel wrap(final String title, final java.awt.Component inside) {

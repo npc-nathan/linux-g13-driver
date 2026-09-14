@@ -498,8 +498,24 @@ and its credential sit together:
 }
 ```
 
-An editor for those, in this window, is the next thing to land here; the file is read as you type
-it, so a change takes effect without restarting anything.
+The **Endpoints** tab of that window is where they are made and edited, with no confirm buttons —
+the file is written as you type and the daemon reads it within a second:
+
+- **Add…** names an address; the fields are its **address**, its **token** (sent as
+  `Authorization: Bearer …`, hidden behind a **show** tick), a **timeout**, and a tick to accept a
+  certificate that does not check out for a local server.
+- The line under the fields shows the spec to paste into an applet, e.g.
+  `http:home/api/states/sensor.outside#state`.
+- **Test** reads the address with `g13-visuals --read`, the same reader the pad uses, so a test that
+  passes here is a test that passes on the screen. Anything else would be a second opinion about
+  how to fetch a web address, and the one thing worse than no test is a test that disagrees.
+- The file holds the token, so it is written **readable only by you**. Any keys the window does not
+  offer are kept when it saves, so hand-written `headers` survive being edited here.
+
+```bash
+g13-visuals --read 'http:home/api/states/sensor.outside#state'
+```
+reads one source from a terminal, exactly as an applet would see it, and says why when it is empty.
 
 An applet is a JSON file, and it can be passed around, so this is where a capability is granted —
 which is why it is a window and not a config key. Everything starts switched on, so an install
